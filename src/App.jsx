@@ -6,13 +6,66 @@ import {
   Check, Clock, Plus, KeyRound, Sparkles, X, ChevronLeft, 
   MailCheck, Trash2, AlertTriangle, Image as ImageIcon, 
   Mic, Square, Camera, Palette, RotateCcw, MoreVertical, 
-  UserCheck, UserX, MessageCircle 
+  UserCheck, UserX, MessageCircle, Smile, Edit2, CornerUpLeft, 
+  CheckCheck, AlertCircle, ChevronDown, Crown, User, UserMinus, 
+  Eye, EyeOff, Bot, HelpCircle, Flame, Lock, Archive, ShieldCheck, 
+  BarChart2, ExternalLink, Play
 } from 'lucide-react';
 
-// EmailJS Credentials
 const EMAILJS_SERVICE_ID = 'service_l1fiok5';
 const EMAILJS_TEMPLATE_ID = 'template_lbuqucn';
 const EMAILJS_PUBLIC_KEY = '5nZrVHZgApUZf00Z4';
+
+const DEFAULT_5_REACTIONS = ['👍', '❤️', '😂', '😮', '😢'];
+const EMOJI_PALETTE = [
+  '😀','😃','😄','😁','😆','😅','😂','🤣','🥲','🥹','😊','😇','🙂','😉','😌','😍',
+  '🥰','😘','😗','😙','😚','😋','😛','😝','😜','🤪','🤨','🧐','🤓','😎','🥸','🤩',
+  '🥳','😏','😒','😞','😔','😟','😕','🙁','☹️','😣','😖','😫','😩','🥺','😢','😭',
+  '😮‍💨','😤','😠','😡','🤬','🤯','😳','🥵','🥶','😱','😨','😰','😥','😓','🤗','🫡',
+  '🤔','🫢','🫣','🤫','🤥','😶','😐','😑','😬','🙄','😯','😦','😧','😮','😲','🥱',
+  '😴','🤤','😪','😵','😵‍💫','🤐','🥴','🤢','🤮','🤧','😷','🤒','🤕','🤑','🤠','😈',
+  '👿','👹','👺','🤡','💩','👻','💀','☠️','👽','👾','🤖','🎃','😺','😸','😹','😻',
+  '😼','😽','🙀','😿','😾','👋','🤚','🖐️','✋','🖖','🫱','🫲','🫳','🫴','👌','🤌',
+  '🤏','✌️','🤞','🫰','🤟','🤘','🤙','👈','👉','👆','🖕','👇','☝️','🫵','👍','👎',
+  '✊','👊','🤛','🤜','👏','🙌','🫶','👐','🤲','🤝','🙏','✍️','💅','🤳','💪','❤️',
+  '🧡','💛','💚','💙','💜','🖤','🤍','🤎','💔','❤️‍🔥','❤️‍🩹','❣️','💕','💞','💓',
+  '💗','💖','💘','💝','🔥','✨','🎉','🎊','🚀','💯'
+];
+
+const FAVICON_SVG = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="28" cy="36" r="15" fill="%230f172a"/><path d="M12 88 C12 62 44 62 44 88 Z" fill="%230f172a"/><circle cx="72" cy="36" r="15" fill="%230f172a"/><path d="M56 88 C56 62 88 62 88 88 Z" fill="%230f172a"/><path d="M38 28 C38 18 64 18 64 28 C64 35 55 37 49 41 L43 45 L45 39 C39 39 38 34 38 28 Z" fill="%230f172a"/><rect x="43" y="24" width="16" height="2.5" rx="1.2" fill="%23ffffff"/><rect x="43" y="29" width="16" height="2.5" rx="1.2" fill="%23ffffff"/></svg>`;
+
+const SYSTEM_AI_PROMPT = `You are Meta AI in svpp-chat, an advanced real-time messenger built with React and Supabase.
+You can answer ANY question the user asks accurately: science, coding, math, general knowledge, history, translations, writing, and advice.
+You also know all svpp-chat app features:
+1. Created for real-time messaging with Supabase Auth & WebSockets.
+2. Group chats: The creator is labeled "Owner" with a golden crown and has full rights to remove members.
+3. Read receipts: 1 gray checkmark for Sent, 2 blue checkmarks for Seen, with seen counters for groups.
+4. Message options: Edit messages, quote replies, WhatsApp 5 quick reactions, delete for me, delete for everyone.
+5. Live indicators: Continuous typing with 3 animated dots and avatar, Snapchat-style top pop-up notification banners with audio pop sounds.
+6. Rich media & security: YouTube video thumbnail embeds, group polls, view-once photos, archived chats with PIN security, account deletion ("Account deleted"), and unfriended status ("unfriend").
+Be helpful, accurate, polite, and concise.`;
+
+const playPopNotificationSound = () => {
+  try {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) return;
+    const ctx = new AudioContextClass();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(587.33, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.1);
+
+    gain.gain.setValueAtTime(0.18, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.28);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.28);
+  } catch (err) {}
+};
 
 const compressImage = (file, maxWidth = 800, maxHeight = 800, quality = 0.75) => {
   return new Promise((resolve, reject) => {
@@ -33,7 +86,7 @@ const compressImage = (file, maxWidth = 800, maxHeight = 800, quality = 0.75) =>
           }
         } else {
           if (height > maxHeight) {
-            width = Math.round((width * maxHeight) / height);
+            width = Math.round((height * maxHeight) / height);
             height = maxHeight;
           }
         }
@@ -50,77 +103,229 @@ const compressImage = (file, maxWidth = 800, maxHeight = 800, quality = 0.75) =>
   });
 };
 
+const extractYouTubeId = (text) => {
+  if (!text) return null;
+  const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/;
+  const match = text.match(regExp);
+  return (match && match[2].length === 11) ? match[2] : null;
+};
+
 export default function App() {
   const [session, setSession] = useState(null);
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // Responsive state
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
-
-  // Real-time Online Presence
   const [onlineUserIds, setOnlineUserIds] = useState(new Set());
 
-  // Auth Inputs
   const [authMode, setAuthMode] = useState('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [username, setUsername] = useState('');
   const [authError, setAuthError] = useState('');
+  const [showAuthPassword, setShowAuthPassword] = useState(false);
 
-  // Tabs: 'chats' | 'friends' | 'users' | 'requests'
+  const [currentSessionPassword, setCurrentSessionPassword] = useState(() => {
+    return localStorage.getItem('svpp_user_session_pwd') || '';
+  });
+  const [archivePin, setArchivePin] = useState(() => {
+    return localStorage.getItem('svpp_user_archive_pin') || '1234';
+  });
+  const [showSavedPassword, setShowSavedPassword] = useState(false);
+  const [showArchivePin, setShowArchivePin] = useState(false);
+
   const [activeTab, setActiveTab] = useState('chats');
+  const [chatFilter, setChatFilter] = useState('all');
+
   const [allUsers, setAllUsers] = useState([]);
   const [friendships, setFriendships] = useState([]); 
   const [conversations, setConversations] = useState([]);
+  const [archivedConvIds, setArchivedConvIds] = useState(() => {
+    try {
+      const saved = localStorage.getItem('svpp_archived_convs');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [showArchiveModal, setShowArchiveModal] = useState(false);
+  const [enteredArchivePin, setEnteredArchivePin] = useState('');
+  const [isArchiveUnlocked, setIsArchiveUnlocked] = useState(false);
+  const [chatDropdownOpenId, setChatDropdownOpenId] = useState(null);
+
   const [activeConversation, setActiveConversation] = useState(null);
+  const [activeConvMembers, setActiveConvMembers] = useState([]);
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
   const [requests, setRequests] = useState([]);
+  const [hasMoreMessages, setHasMoreMessages] = useState(false);
+  const [loadingOlderMessages, setLoadingOlderMessages] = useState(false);
 
-  // Voice recording
+  const [unreadCounts, setUnreadCounts] = useState({});
+
+  const [typingUsers, setTypingUsers] = useState({});
+  const [convTypingMap, setConvTypingMap] = useState({});
+  const [snapchatBanner, setSnapchatBanner] = useState(null);
+  
+  const lastTypingBroadcastTimeRef = useRef(0);
+  const typingStopTimerRef = useRef(null);
+  const receiverTypingTimersRef = useRef({});
+  const globalTypingChannelRef = useRef(null);
+  const snapchatBannerTimeoutRef = useRef(null);
+  const activeConversationRef = useRef(null);
+
+  const [showAiModal, setShowAiModal] = useState(false);
+  const [aiMessages, setAiMessages] = useState([
+    { id: 1, sender: 'ai', text: 'Hi! I am your Meta AI Assistant. Ask me any question in the world, or ask about any svpp-chat feature!' }
+  ]);
+  const [aiInput, setAiInput] = useState('');
+  const [isAiResponding, setIsAiResponding] = useState(false);
+  const aiChatEndRef = useRef(null);
+
   const [isRecording, setIsRecording] = useState(false);
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
 
-  // Chat Wallpaper
   const [chatBg, setChatBg] = useState(() => {
     try {
       const saved = localStorage.getItem('chat_wallpaper_config');
-      return saved ? JSON.parse(saved) : { type: 'color', value: '#ffffff' };
+      return saved ? JSON.parse(saved) : { type: 'color', value: '#efeae2' };
     } catch {
-      return { type: 'color', value: '#ffffff' };
+      return { type: 'color', value: '#efeae2' };
     }
   });
 
-  // Message Deletion Menu
   const [selectedMessageForDelete, setSelectedMessageForDelete] = useState(null);
+  const [editingMessage, setEditingMessage] = useState(null);
+  const [replyingTo, setReplyingTo] = useState(null);
+  const [reactions, setReactions] = useState([]);
+  const [hoveredMessageId, setHoveredMessageId] = useState(null);
+  const [activeReactionPickerMsgId, setActiveReactionPickerMsgId] = useState(null);
+  const [showExtendedReactions, setShowExtendedReactions] = useState(false);
+  const [showComposerEmojiPicker, setShowComposerEmojiPicker] = useState(false);
+  const [sendingStatuses, setSendingStatuses] = useState({});
 
-  // Modals
+  const [mobileContextMenuMsg, setMobileContextMenuMsg] = useState(null);
+  const touchTimerRef = useRef(null);
+
+  const [pendingImageUpload, setPendingImageUpload] = useState(null);
+  const [isViewOnceChecked, setIsViewOnceChecked] = useState(false);
+  const [viewOnceViewerData, setViewOnceViewerData] = useState(null);
+
+  const [showPollModal, setShowPollModal] = useState(false);
+  const [pollQuestion, setPollQuestion] = useState('');
+  const [pollOptions, setPollOptions] = useState(['', '']);
+
+  const [quickEmojis, setQuickEmojis] = useState(() => {
+    try {
+      const saved = localStorage.getItem('chat_quick_reactions');
+      return saved ? JSON.parse(saved) : DEFAULT_5_REACTIONS;
+    } catch {
+      return DEFAULT_5_REACTIONS;
+    }
+  });
+
+  const [showScrollBottomBtn, setShowScrollBottomBtn] = useState(false);
+  const [previewImage, setPreviewImage] = useState(null);
+  const [profilePreviewTarget, setProfilePreviewTarget] = useState(null);
+
   const [showGroupModal, setShowGroupModal] = useState(false);
+  const [showGroupInfoModal, setShowGroupInfoModal] = useState(false);
   const [groupName, setGroupName] = useState('');
   const [selectedGroupUsers, setSelectedGroupUsers] = useState([]);
   const [showNewChatModal, setShowNewChatModal] = useState(false);
+  const [showAddMemberModal, setShowAddMemberModal] = useState(false);
 
-  // Settings Modal
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [settingsTab, setSettingsTab] = useState('profile');
   const [changeOption, setChangeOption] = useState('both');
   const [newUsername, setNewUsername] = useState('');
   const [newPassword, setNewPassword] = useState('');
+  const [newArchivePinInput, setNewArchivePinInput] = useState('');
   const [settingsMsg, setSettingsMsg] = useState({ text: '', type: '' });
   const [savingSettings, setSavingSettings] = useState(false);
 
-  // Deletion Verification Flow
   const [deleteStep, setDeleteStep] = useState('idle');
   const [generatedDeleteOtp, setGeneratedDeleteOtp] = useState('');
   const [enteredDeleteOtp, setEnteredDeleteOtp] = useState('');
   const [deletingAccount, setDeletingAccount] = useState(false);
 
   const messagesEndRef = useRef(null);
+  const chatContainerRef = useRef(null);
   const fileInputRef = useRef(null);
   const avatarInputRef = useRef(null);
+  const groupAvatarInputRef = useRef(null);
   const bgImageInputRef = useRef(null);
+
+  useEffect(() => {
+    activeConversationRef.current = activeConversation;
+  }, [activeConversation]);
+
+  useEffect(() => {
+    let link = document.querySelector("link[rel~='icon']");
+    if (!link) {
+      link = document.createElement('link');
+      link.rel = 'icon';
+      document.head.appendChild(link);
+    }
+    link.href = FAVICON_SVG;
+
+    const styleTag = document.createElement('style');
+    styleTag.innerHTML = `
+      @keyframes typingDot {
+        0%, 80%, 100% { transform: scale(0.3); opacity: 0.3; }
+        40% { transform: scale(1); opacity: 1; }
+      }
+      .typing-dot {
+        width: 6px;
+        height: 6px;
+        background-color: #54656f;
+        border-radius: 50%;
+        display: inline-block;
+        animation: typingDot 1.4s infinite ease-in-out both;
+      }
+      .typing-dot:nth-child(1) { animation-delay: -0.32s; }
+      .typing-dot:nth-child(2) { animation-delay: -0.16s; }
+      .typing-dot:nth-child(3) { animation-delay: 0s; }
+      
+      @keyframes slideDownToast {
+        from { transform: translate(-50%, -100%); opacity: 0; }
+        to { transform: translate(-50%, 0); opacity: 1; }
+      }
+      .snap-toast {
+        animation: slideDownToast 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+      }
+
+      @keyframes metaAiRotate {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+      }
+      .meta-ai-ring {
+        background: conic-gradient(#0084ff, #44bec7, #ffc300, #fa3c4c, #d696bb, #0084ff);
+        animation: metaAiRotate 4s linear infinite;
+      }
+    `;
+    document.head.appendChild(styleTag);
+    return () => {
+      if (document.head.contains(styleTag)) document.head.removeChild(styleTag);
+    };
+  }, []);
+
+  useEffect(() => {
+    const totalUnread = Object.values(unreadCounts).reduce((acc, count) => acc + (count || 0), 0);
+    const activeTypingList = Object.values(typingUsers);
+
+    if (activeTypingList.length > 0) {
+      const typingName = activeConversation?.is_group
+        ? `${activeTypingList.map((u) => u.username).join(', ')} is typing...`
+        : 'typing...';
+      document.title = `${typingName} • svpp-chat`;
+    } else if (totalUnread > 0) {
+      document.title = `(${totalUnread}) unread message${totalUnread > 1 ? 's' : ''} • svpp-chat`;
+    } else {
+      document.title = 'svpp-chat';
+    }
+  }, [unreadCounts, typingUsers, activeConversation]);
 
   useEffect(() => {
     const handleResize = () => setIsMobile(window.innerWidth <= 768);
@@ -128,7 +333,12 @@ export default function App() {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  // 1. Session Lifecycle
+  useEffect(() => {
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
+  }, []);
+
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
@@ -169,7 +379,6 @@ export default function App() {
     ]);
   };
 
-  // 2. Real-time Presence
   useEffect(() => {
     if (!profile?.id) return;
 
@@ -193,7 +402,6 @@ export default function App() {
     };
   }, [profile?.id]);
 
-  // 3. Real-time Listeners
   useEffect(() => {
     if (!profile?.id) return;
 
@@ -205,7 +413,48 @@ export default function App() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'conversation_members' }, () => {
         fetchConversations(profile.id);
       })
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, () => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'conversations' }, () => {
+        fetchConversations(profile.id);
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, () => {
+        fetchUsers(profile.id);
+        fetchConversations(profile.id);
+      })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, async (payload) => {
+        const isMsgInCurrentActiveChat = activeConversationRef.current?.id === payload.new.conversation_id;
+
+        if (payload.new.sender_id !== profile.id) {
+          playPopNotificationSound();
+
+          const { data: senderInfo } = await supabase
+            .from('profiles')
+            .select('username, avatar_url')
+            .eq('id', payload.new.sender_id)
+            .single();
+
+          if (senderInfo) {
+            setSnapchatBanner({
+              username: senderInfo.username || 'Account deleted',
+              avatar_url: senderInfo.avatar_url,
+              content: payload.new.content,
+              convId: payload.new.conversation_id,
+            });
+
+            clearTimeout(snapchatBannerTimeoutRef.current);
+            snapchatBannerTimeoutRef.current = setTimeout(() => {
+              setSnapchatBanner(null);
+            }, 3800);
+          }
+
+          if (isMsgInCurrentActiveChat) {
+            markAsRead(payload.new.conversation_id);
+          } else {
+            setUnreadCounts((prev) => ({
+              ...prev,
+              [payload.new.conversation_id]: (prev[payload.new.conversation_id] || 0) + 1,
+            }));
+          }
+        }
         fetchConversations(profile.id);
       })
       .subscribe();
@@ -215,7 +464,64 @@ export default function App() {
     };
   }, [profile?.id]);
 
-  // 4. Email Dispatch Helper
+  useEffect(() => {
+    if (!profile?.id) return;
+
+    const typingChannel = supabase.channel('global-typing-channel', {
+      config: { broadcast: { self: false } }
+    });
+    globalTypingChannelRef.current = typingChannel;
+
+    typingChannel
+      .on('broadcast', { event: 'typing' }, ({ payload }) => {
+        if (!payload || payload.userId === profile.id) return;
+
+        const { convId, userId, username, isTyping } = payload;
+
+        if (receiverTypingTimersRef.current[userId]) {
+          clearTimeout(receiverTypingTimersRef.current[userId]);
+        }
+
+        if (isTyping) {
+          setConvTypingMap((prev) => ({ ...prev, [convId]: username }));
+
+          if (activeConversationRef.current?.id === convId) {
+            setTypingUsers((prev) => ({ ...prev, [userId]: payload }));
+          }
+
+          receiverTypingTimersRef.current[userId] = setTimeout(() => {
+            setConvTypingMap((prev) => {
+              const copy = { ...prev };
+              delete copy[convId];
+              return copy;
+            });
+            setTypingUsers((prev) => {
+              const copy = { ...prev };
+              delete copy[userId];
+              return copy;
+            });
+          }, 3200);
+        } else {
+          setConvTypingMap((prev) => {
+            const copy = { ...prev };
+            delete copy[convId];
+            return copy;
+          });
+          setTypingUsers((prev) => {
+            const copy = { ...prev };
+            delete copy[userId];
+            return copy;
+          });
+        }
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(typingChannel);
+      globalTypingChannelRef.current = null;
+    };
+  }, [profile?.id]);
+
   const sendCredentialsToMail = async ({ targetEmail, uname, pwd, actionType }) => {
     const templateParams = {
       to_name: uname || targetEmail,
@@ -235,7 +541,6 @@ export default function App() {
     );
   };
 
-  // 5. Data Fetchers
   const fetchUsers = async (myId) => {
     const { data } = await supabase.from('profiles').select('*').neq('id', myId);
     if (data) setAllUsers(data);
@@ -261,7 +566,7 @@ export default function App() {
   const fetchConversations = async (myId) => {
     const { data: memberRows, error } = await supabase
       .from('conversation_members')
-      .select('conversation_id, hidden_at')
+      .select('conversation_id, hidden_at, last_read_at')
       .eq('user_id', myId);
 
     if (error || !memberRows || memberRows.length === 0) {
@@ -276,10 +581,28 @@ export default function App() {
       .in('id', convIds)
       .order('created_at', { ascending: false });
 
-    if (convList) setConversations(convList);
+    if (convList) {
+      setConversations(convList);
+      convList.forEach(async (c) => {
+        if (activeConversationRef.current?.id === c.id) {
+          setUnreadCounts((prev) => ({ ...prev, [c.id]: 0 }));
+          return;
+        }
+
+        const myMem = memberRows.find((m) => m.conversation_id === c.id);
+        const lastRead = myMem?.last_read_at || '1970-01-01';
+        const { count } = await supabase
+          .from('messages')
+          .select('id', { count: 'exact', head: true })
+          .eq('conversation_id', c.id)
+          .gt('created_at', lastRead)
+          .neq('sender_id', myId);
+
+        setUnreadCounts((prev) => ({ ...prev, [c.id]: count || 0 }));
+      });
+    }
   };
 
-  // 6. Relationships & Friends
   const getRelationStatus = (otherUserId) => {
     const rel = friendships.find(
       (f) => (f.sender_id === otherUserId && f.receiver_id === profile?.id) ||
@@ -320,14 +643,12 @@ export default function App() {
     );
 
     await supabase.from('friend_requests').update({ status: 'accepted' }).eq('id', requestId);
-
     const senderProfile = allUsers.find((u) => u.id === senderId) || { id: senderId, username: 'Friend' };
     await handleStartDirectChat(senderProfile, true);
   };
 
   const handleRemoveFriend = async (friendId) => {
-    const confirmRemove = window.confirm('Remove this friend? You will not be able to message each other until re-friended.');
-    if (!confirmRemove) return;
+    if (!window.confirm('Unfriend this user?')) return;
 
     await supabase
       .from('friend_requests')
@@ -337,36 +658,82 @@ export default function App() {
     await syncSocialGraph(profile.id);
   };
 
-  // 7. Instant Chat Activation (Unhides if previously hidden)
+  const markAsRead = async (convId) => {
+    if (!profile?.id || !convId) return;
+    const now = new Date().toISOString();
+
+    setUnreadCounts((prev) => ({ ...prev, [convId]: 0 }));
+
+    await supabase
+      .from('conversation_members')
+      .update({ last_read_at: now })
+      .match({ conversation_id: convId, user_id: profile.id });
+  };
+
+  const handleSelectConversation = (c) => {
+    setActiveConversation(c);
+    setTypingUsers({});
+    markAsRead(c.id);
+  };
+
+  const toggleArchiveChat = (convId, e) => {
+    e.stopPropagation();
+    setChatDropdownOpenId(null);
+    let updated;
+    if (archivedConvIds.includes(convId)) {
+      updated = archivedConvIds.filter((id) => id !== convId);
+    } else {
+      updated = [...archivedConvIds, convId];
+    }
+    setArchivedConvIds(updated);
+    localStorage.setItem('svpp_archived_convs', JSON.stringify(updated));
+  };
+
+  const handleOpenArchiveSection = () => {
+    if (isArchiveUnlocked) {
+      setShowArchiveModal(true);
+    } else {
+      setEnteredArchivePin('');
+      setShowArchiveModal(true);
+    }
+  };
+
+  const verifyArchivePin = () => {
+    if (enteredArchivePin.trim() === archivePin.trim()) {
+      setIsArchiveUnlocked(true);
+      setEnteredArchivePin('');
+    } else {
+      alert('Incorrect Archive PIN.');
+    }
+  };
+
   const handleStartDirectChat = async (friend, isInitialAccept = false) => {
     let existing = conversations.find(
       (c) => !c.is_group && c.conversation_members?.some((m) => m.user_id === friend.id)
     );
 
     if (existing) {
-      // Unhide the conversation if it was deleted/hidden
       await supabase
         .from('conversation_members')
-        .update({ hidden_at: null })
+        .update({ hidden_at: null, last_read_at: new Date().toISOString() })
         .eq('conversation_id', existing.id)
         .eq('user_id', profile.id);
 
-      // Update in local state
       const unhiddenConv = {
         ...existing,
         conversation_members: existing.conversation_members.map((m) =>
-          m.user_id === profile.id ? { ...m, hidden_at: null } : m
+          m.user_id === profile.id ? { ...m, hidden_at: null, last_read_at: new Date().toISOString() } : m
         ),
       };
 
-      setActiveConversation(unhiddenConv);
+      handleSelectConversation(unhiddenConv);
       setConversations((prev) => [unhiddenConv, ...prev.filter((c) => c.id !== unhiddenConv.id)]);
       setShowNewChatModal(false);
+      setProfilePreviewTarget(null);
       setActiveTab('chats');
       return;
     }
 
-    // Otherwise, create a new conversation
     const { data: newConv, error: convErr } = await supabase
       .from('conversations')
       .insert({ is_group: false })
@@ -378,9 +745,10 @@ export default function App() {
       return;
     }
 
+    const now = new Date().toISOString();
     await supabase.from('conversation_members').insert([
-      { conversation_id: newConv.id, user_id: profile.id, hidden_at: null },
-      { conversation_id: newConv.id, user_id: friend.id, hidden_at: null }
+      { conversation_id: newConv.id, user_id: profile.id, hidden_at: null, last_read_at: now },
+      { conversation_id: newConv.id, user_id: friend.id, hidden_at: null, last_read_at: '1970-01-01' }
     ]);
 
     await supabase.from('messages').insert({
@@ -392,16 +760,16 @@ export default function App() {
     const builtConv = {
       ...newConv,
       conversation_members: [
-        { conversation_id: newConv.id, user_id: profile.id, profiles: profile, hidden_at: null },
-        { conversation_id: newConv.id, user_id: friend.id, profiles: friend, hidden_at: null }
+        { conversation_id: newConv.id, user_id: profile.id, profiles: profile, hidden_at: null, last_read_at: now },
+        { conversation_id: newConv.id, user_id: friend.id, profiles: friend, hidden_at: null, last_read_at: '1970-01-01' }
       ]
     };
 
-    setActiveConversation(builtConv);
+    handleSelectConversation(builtConv);
     setConversations((prev) => [builtConv, ...prev.filter((c) => c.id !== builtConv.id)]);
     setShowNewChatModal(false);
+    setProfilePreviewTarget(null);
     setActiveTab('chats');
-
     fetchConversations(profile.id);
   };
 
@@ -409,17 +777,23 @@ export default function App() {
     if (!groupName.trim() || selectedGroupUsers.length === 0) return;
     const { data: conv } = await supabase
       .from('conversations')
-      .insert({ is_group: true, name: groupName.trim() })
+      .insert({ 
+        is_group: true, 
+        name: groupName.trim(), 
+        created_by: profile.id
+      })
       .select()
       .single();
 
     if (conv) {
-      const members = [profile.id, ...selectedGroupUsers].map((uid) => ({
+      const now = new Date().toISOString();
+      const membersToInsert = [profile.id, ...selectedGroupUsers].map((uid) => ({
         conversation_id: conv.id,
         user_id: uid,
         hidden_at: null,
+        last_read_at: uid === profile.id ? now : '1970-01-01',
       }));
-      await supabase.from('conversation_members').insert(members);
+      await supabase.from('conversation_members').insert(membersToInsert);
       setShowGroupModal(false);
       setGroupName('');
       setSelectedGroupUsers([]);
@@ -427,30 +801,129 @@ export default function App() {
     }
   };
 
-  // 8. Real-time Messages
+  const handleRemoveMember = async (targetUserId, targetUsername) => {
+    if (!window.confirm(`Remove ${targetUsername || 'this user'} from the group?`)) return;
+    const { error } = await supabase
+      .from('conversation_members')
+      .delete()
+      .match({ conversation_id: activeConversation.id, user_id: targetUserId });
+
+    if (error) {
+      alert('Failed to remove member: ' + error.message);
+    } else {
+      loadActiveMembers(activeConversation.id);
+      fetchConversations(profile.id);
+    }
+  };
+
+  const handleLeaveGroup = async () => {
+    if (!window.confirm('Are you sure you want to leave this group?')) return;
+    await supabase
+      .from('conversation_members')
+      .delete()
+      .match({ conversation_id: activeConversation.id, user_id: profile.id });
+
+    setActiveConversation(null);
+    setShowGroupInfoModal(false);
+    fetchConversations(profile.id);
+  };
+
+  const handleGroupAvatarUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file || !activeConversation) return;
+    try {
+      const compressedAvatar = await compressImage(file, 400, 400, 0.8);
+      const { error } = await supabase
+        .from('conversations')
+        .update({ avatar_url: compressedAvatar })
+        .eq('id', activeConversation.id);
+
+      if (error) throw error;
+
+      setActiveConversation((prev) => ({ ...prev, avatar_url: compressedAvatar }));
+      setConversations((prev) =>
+        prev.map((c) => (c.id === activeConversation.id ? { ...c, avatar_url: compressedAvatar } : c))
+      );
+    } catch (err) {
+      alert('Failed to update group picture: ' + err.message);
+    } finally {
+      e.target.value = null;
+    }
+  };
+
+  const handleAddMemberToExistingGroup = async (friendId) => {
+    if (!activeConversation) return;
+    const { error } = await supabase.from('conversation_members').insert({
+      conversation_id: activeConversation.id,
+      user_id: friendId,
+      hidden_at: null,
+      last_read_at: '1970-01-01'
+    });
+
+    if (error) {
+      alert('Could not add member: ' + error.message);
+    } else {
+      loadActiveMembers(activeConversation.id);
+      fetchConversations(profile.id);
+      setShowAddMemberModal(false);
+    }
+  };
+
+  const loadActiveMembers = async (convId) => {
+    const { data } = await supabase
+      .from('conversation_members')
+      .select('*, profiles(*)')
+      .eq('conversation_id', convId);
+    if (data) setActiveConvMembers(data);
+  };
+
+  const fetchActiveConvReactions = async (msgIds) => {
+    if (!msgIds || msgIds.length === 0) {
+      setReactions([]);
+      return;
+    }
+    const { data } = await supabase
+      .from('message_reactions')
+      .select('*, profiles(username)')
+      .in('message_id', msgIds);
+    if (data) setReactions(data);
+  };
+
   useEffect(() => {
     if (!activeConversation) return;
 
-    const loadMessages = async () => {
-      const { data, error } = await supabase
+    loadActiveMembers(activeConversation.id);
+    markAsRead(activeConversation.id);
+
+    const loadInitialMessages = async () => {
+      const { data, error, count } = await supabase
         .from('messages')
-        .select('*, profiles(username, avatar_url)')
+        .select('*, profiles(username, avatar_url)', { count: 'exact' })
         .eq('conversation_id', activeConversation.id)
-        .order('created_at', { ascending: true });
+        .order('created_at', { ascending: false })
+        .range(0, 35);
 
       if (!error && data) {
-        const visible = data.filter((m) => {
+        const sorted = data.reverse();
+        const visible = sorted.filter((m) => {
           if (m.is_deleted_for_everyone) return false;
           if (m.deleted_for && m.deleted_for.includes(profile.id)) return false;
           return true;
         });
         setMessages(visible);
+        setHasMoreMessages((count || 0) > 35);
+        fetchActiveConvReactions(visible.map((m) => m.id));
+
+        setTimeout(() => {
+          if (chatContainerRef.current) {
+            chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+          }
+        }, 50);
       }
     };
-    loadMessages();
+    loadInitialMessages();
 
-    const channel = supabase
-      .channel(`chat:${activeConversation.id}`)
+    const channel = supabase.channel(`chat:${activeConversation.id}`)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'messages', filter: `conversation_id=eq.${activeConversation.id}` },
@@ -463,13 +936,42 @@ export default function App() {
                 .eq('id', payload.new.sender_id)
                 .single();
 
-              setMessages((prev) => [...prev, { ...payload.new, profiles: senderProfile }]);
+              setMessages((prev) => {
+                const existingOptIndex = prev.findIndex(
+                  (m) => String(m.id).startsWith('opt-') && m.sender_id === payload.new.sender_id && m.content === payload.new.content
+                );
+                if (existingOptIndex !== -1) {
+                  const copy = [...prev];
+                  copy[existingOptIndex] = { ...payload.new, profiles: senderProfile };
+                  return copy;
+                }
+                if (prev.some((m) => m.id === payload.new.id)) return prev;
+                return [...prev, { ...payload.new, profiles: senderProfile }];
+              });
+
+              if (payload.new.sender_id !== profile.id) {
+                markAsRead(activeConversation.id);
+              }
+
+              setTimeout(() => scrollToBottom('smooth'), 50);
             }
           } else if (payload.eventType === 'UPDATE') {
             if (payload.new.is_deleted_for_everyone || payload.new.deleted_for?.includes(profile.id)) {
               setMessages((prev) => prev.filter((m) => m.id !== payload.new.id));
+            } else {
+              setMessages((prev) => prev.map((m) => (m.id === payload.new.id ? { ...m, ...payload.new } : m)));
             }
           }
+        }
+      )
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'message_reactions' }, () => {
+        if (messages.length > 0) fetchActiveConvReactions(messages.map((m) => m.id));
+      })
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'conversation_members', filter: `conversation_id=eq.${activeConversation.id}` },
+        () => {
+          loadActiveMembers(activeConversation.id);
         }
       )
       .subscribe();
@@ -477,39 +979,299 @@ export default function App() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [activeConversation, profile?.id]);
+  }, [activeConversation?.id, profile?.id]);
 
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  const loadOlderMessages = async () => {
+    if (loadingOlderMessages || !hasMoreMessages || messages.length === 0 || !activeConversation) return;
+    setLoadingOlderMessages(true);
 
-  const sendMessage = async (e) => {
-    if (e) e.preventDefault();
-    if (!newMessage.trim() || !activeConversation) return;
-    const content = newMessage.trim();
-    setNewMessage('');
+    const oldestMsgCreatedAt = messages[0].created_at;
+    const container = chatContainerRef.current;
+    const prevScrollHeight = container ? container.scrollHeight : 0;
 
-    await supabase.from('messages').insert({
+    const { data, error } = await supabase
+      .from('messages')
+      .select('*, profiles(username, avatar_url)')
+      .eq('conversation_id', activeConversation.id)
+      .lt('created_at', oldestMsgCreatedAt)
+      .order('created_at', { ascending: false })
+      .limit(30);
+
+    if (!error && data && data.length > 0) {
+      const olderSorted = data.reverse();
+      const visibleOlder = olderSorted.filter((m) => {
+        if (m.is_deleted_for_everyone) return false;
+        if (m.deleted_for && m.deleted_for.includes(profile.id)) return false;
+        return true;
+      });
+
+      setMessages((prev) => [...visibleOlder, ...prev]);
+      setHasMoreMessages(data.length === 30);
+      fetchActiveConvReactions(visibleOlder.map((m) => m.id));
+
+      setTimeout(() => {
+        if (container) {
+          const newScrollHeight = container.scrollHeight;
+          container.scrollTop = newScrollHeight - prevScrollHeight;
+        }
+      }, 30);
+    } else {
+      setHasMoreMessages(false);
+    }
+    setLoadingOlderMessages(false);
+  };
+
+  const handleComposerTyping = (val) => {
+    setNewMessage(val);
+
+    if (!globalTypingChannelRef.current || !profile || !activeConversation) return;
+
+    const now = Date.now();
+    if (now - lastTypingBroadcastTimeRef.current > 800) {
+      lastTypingBroadcastTimeRef.current = now;
+      globalTypingChannelRef.current.send({
+        type: 'broadcast',
+        event: 'typing',
+        payload: {
+          convId: activeConversation.id,
+          userId: profile.id,
+          username: profile.username || 'Someone',
+          avatarUrl: profile.avatar_url,
+          isTyping: true,
+        },
+      });
+    }
+
+    clearTimeout(typingStopTimerRef.current);
+    typingStopTimerRef.current = setTimeout(() => {
+      lastTypingBroadcastTimeRef.current = 0;
+      if (globalTypingChannelRef.current && activeConversationRef.current) {
+        globalTypingChannelRef.current.send({
+          type: 'broadcast',
+          event: 'typing',
+          payload: {
+            convId: activeConversationRef.current.id,
+            userId: profile.id,
+            username: profile.username || 'Someone',
+            isTyping: false,
+          },
+        });
+      }
+    }, 2400);
+  };
+
+  const handleScrollMessages = () => {
+    if (!chatContainerRef.current) return;
+    const { scrollTop, scrollHeight, clientHeight } = chatContainerRef.current;
+    const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+    setShowScrollBottomBtn(distanceFromBottom > 160);
+  };
+
+  const scrollToBottom = (behavior = 'smooth') => {
+    if (chatContainerRef.current) {
+      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+    }
+  };
+
+  const sendMessage = async (e, retryContent = null, retryReplyId = null) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    const content = retryContent || newMessage.trim();
+    if (!content || !activeConversation) return;
+
+    clearTimeout(typingStopTimerRef.current);
+    lastTypingBroadcastTimeRef.current = 0;
+    if (globalTypingChannelRef.current && activeConversation) {
+      globalTypingChannelRef.current.send({
+        type: 'broadcast',
+        event: 'typing',
+        payload: {
+          convId: activeConversation.id,
+          userId: profile.id,
+          username: profile.username || 'Someone',
+          isTyping: false,
+        },
+      });
+    }
+
+    if (editingMessage) {
+      const msgId = editingMessage.id;
+      setEditingMessage(null);
+      setNewMessage('');
+      setShowComposerEmojiPicker(false);
+
+      setMessages((prev) => prev.map((m) => m.id === msgId ? { ...m, content, edited_at: new Date().toISOString() } : m));
+
+      await supabase
+        .from('messages')
+        .update({
+          content,
+          edited_at: new Date().toISOString()
+        })
+        .eq('id', msgId);
+      return;
+    }
+
+    const optId = `opt-${Date.now()}`;
+    const replyId = retryReplyId || (replyingTo ? replyingTo.id : null);
+    const currentReplying = replyingTo;
+
+    if (!retryContent) {
+      setReplyingTo(null);
+      setNewMessage('');
+      setShowComposerEmojiPicker(false);
+    }
+
+    const optimisticMsg = {
+      id: optId,
       conversation_id: activeConversation.id,
       sender_id: profile.id,
       content,
-    });
+      reply_to_id: replyId,
+      reply_to: currentReplying,
+      created_at: new Date().toISOString(),
+      profiles: profile,
+    };
+
+    setMessages((prev) => [...prev.filter((m) => m.id !== optId), optimisticMsg]);
+    setSendingStatuses((prev) => ({ ...prev, [optId]: 'sending' }));
+    setTimeout(() => scrollToBottom('smooth'), 50);
+
+    try {
+      const { data, error } = await supabase
+        .from('messages')
+        .insert({
+          conversation_id: activeConversation.id,
+          sender_id: profile.id,
+          content,
+          reply_to_id: replyId,
+        })
+        .select('*, profiles(username, avatar_url)')
+        .single();
+
+      if (error) throw error;
+
+      if (data) {
+        setMessages((prev) => prev.map((m) => m.id === optId ? data : m));
+        setSendingStatuses((prev) => ({ ...prev, [data.id]: 'sent' }));
+        setTimeout(() => {
+          setSendingStatuses((prev) => {
+            const updated = { ...prev };
+            delete updated[optId];
+            delete updated[data.id];
+            return updated;
+          });
+        }, 3000);
+      }
+    } catch {
+      setSendingStatuses((prev) => ({ ...prev, [optId]: 'failed' }));
+    }
   };
 
-  const handleImageMessageUpload = async (e) => {
+  const handleSelectReaction = async (msgId, chosenEmoji) => {
+    setActiveReactionPickerMsgId(null);
+    setShowExtendedReactions(false);
+
+    if (!quickEmojis.slice(0, 4).includes(chosenEmoji)) {
+      const updated5 = [...quickEmojis.slice(0, 4), chosenEmoji];
+      setQuickEmojis(updated5);
+      localStorage.setItem('chat_quick_reactions', JSON.stringify(updated5));
+    }
+
+    const existing = reactions.find(
+      (r) => r.message_id === msgId && r.user_id === profile.id && r.emoji === chosenEmoji
+    );
+
+    if (existing) {
+      await supabase.from('message_reactions').delete().eq('id', existing.id);
+    } else {
+      await supabase.from('message_reactions').upsert({
+        message_id: msgId,
+        user_id: profile.id,
+        emoji: chosenEmoji
+      }, { onConflict: 'message_id,user_id' });
+    }
+
+    fetchActiveConvReactions(messages.map((m) => m.id));
+  };
+
+  const handleImageFileSelected = async (e) => {
     const file = e.target.files?.[0];
     if (!file || !activeConversation) return;
     try {
       const base64Image = await compressImage(file, 900, 900, 0.7);
-      await supabase.from('messages').insert({
-        conversation_id: activeConversation.id,
-        sender_id: profile.id,
-        content: `[IMAGE]:${base64Image}`,
-      });
+      setPendingImageUpload({ src: base64Image });
+      setIsViewOnceChecked(false);
     } catch {
-      alert('Failed to upload image.');
+      alert('Failed to process image.');
     }
     e.target.value = null;
+  };
+
+  const confirmSendImageMessage = async () => {
+    if (!pendingImageUpload || !activeConversation) return;
+    const imgData = pendingImageUpload.src;
+    const viewOnceFlag = isViewOnceChecked;
+    setPendingImageUpload(null);
+    setIsViewOnceChecked(false);
+
+    const prefix = viewOnceFlag ? '[VIEW-ONCE]:' : '[IMAGE]:';
+    await sendMessage(null, `${prefix}${imgData}`, null);
+  };
+
+  const handleOpenViewOnce = async (msg) => {
+    setViewOnceViewerData(msg);
+  };
+
+  const handleVotePoll = async (msgId, optIndex) => {
+    const targetMsg = messages.find((m) => m.id === msgId);
+    if (!targetMsg || !targetMsg.content.startsWith('[POLL]:')) return;
+
+    try {
+      const pollData = JSON.parse(targetMsg.content.replace('[POLL]:', ''));
+      const votes = pollData.votes || {};
+
+      const hasAlreadyVoted = Object.values(votes).some((voters) => voters.includes(profile.id));
+      if (hasAlreadyVoted) {
+        alert('You have already voted in this poll.');
+        return;
+      }
+
+      const optionVoters = votes[optIndex] || [];
+      votes[optIndex] = [...optionVoters, profile.id];
+      pollData.votes = votes;
+
+      const newContent = `[POLL]:${JSON.stringify(pollData)}`;
+      setMessages((prev) => prev.map((m) => m.id === msgId ? { ...m, content: newContent } : m));
+
+      await supabase
+        .from('messages')
+        .update({ content: newContent })
+        .eq('id', msgId);
+    } catch (err) {
+      console.error('Poll vote error:', err);
+    }
+  };
+
+  const createPollMessage = async () => {
+    if (!pollQuestion.trim() || pollOptions.filter((o) => o.trim()).length < 2) {
+      alert('Please enter a poll question and at least 2 options.');
+      return;
+    }
+
+    const validOptions = pollOptions.filter((o) => o.trim());
+    const pollObject = {
+      question: pollQuestion.trim(),
+      options: validOptions,
+      votes: {}
+    };
+
+    await sendMessage(null, `[POLL]:${JSON.stringify(pollObject)}`, null);
+    setShowPollModal(false);
+    setPollQuestion('');
+    setPollOptions(['', '']);
   };
 
   const startVoiceRecording = async () => {
@@ -533,7 +1295,10 @@ export default function App() {
             conversation_id: activeConversation.id,
             sender_id: profile.id,
             content: `[AUDIO]:${base64Audio}`,
+            reply_to_id: replyingTo ? replyingTo.id : null,
           });
+          setReplyingTo(null);
+          setTimeout(() => scrollToBottom('smooth'), 50);
         };
         stream.getTracks().forEach((track) => track.stop());
       };
@@ -552,19 +1317,13 @@ export default function App() {
     }
   };
 
-  // 9. WhatsApp-Style "Delete Chat" (Hides the chat without deleting messages)
   const handleDeleteChat = async () => {
     if (!activeConversation) return;
-
-    const confirmDelete = window.confirm(
-      'Delete this chat? It will disappear from your chat list. If a new message is sent or received, it will reappear with all previous messages intact.'
-    );
-    if (!confirmDelete) return;
+    if (!window.confirm('Delete this chat from your list? (Reappears upon new messages)')) return;
 
     const convId = activeConversation.id;
     setActiveConversation(null);
 
-    // Optimistically hide the chat locally
     setConversations((prev) =>
       prev.map((c) => {
         if (c.id === convId) {
@@ -579,7 +1338,6 @@ export default function App() {
       })
     );
 
-    // Save hidden_at in Supabase
     await supabase
       .from('conversation_members')
       .update({ hidden_at: new Date().toISOString() })
@@ -589,11 +1347,11 @@ export default function App() {
     fetchConversations(profile.id);
   };
 
-  // 10. Message Deletions
   const handleDeleteForMe = async (msg) => {
     const updatedDeletedFor = [...(msg.deleted_for || []), profile.id];
     setMessages((prev) => prev.filter((m) => m.id !== msg.id));
     setSelectedMessageForDelete(null);
+    setMobileContextMenuMsg(null);
 
     await supabase
       .from('messages')
@@ -604,6 +1362,7 @@ export default function App() {
   const handleDeleteForEveryone = async (msg) => {
     setMessages((prev) => prev.filter((m) => m.id !== msg.id));
     setSelectedMessageForDelete(null);
+    setMobileContextMenuMsg(null);
 
     await supabase
       .from('messages')
@@ -611,7 +1370,6 @@ export default function App() {
       .eq('id', msg.id);
   };
 
-  // 11. Profile Photo & Wallpapers
   const handleProfilePhotoUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -655,19 +1413,18 @@ export default function App() {
   };
 
   const handleResetWallpaper = () => {
-    const defaultConfig = { type: 'color', value: '#ffffff' };
+    const defaultConfig = { type: 'color', value: '#efeae2' };
     setChatBg(defaultConfig);
     localStorage.setItem('chat_wallpaper_config', JSON.stringify(defaultConfig));
   };
 
-  // 12. Credential Update
   const handleUpdateCredentials = async () => {
     setSettingsMsg({ text: '', type: '' });
     setSavingSettings(true);
 
     try {
       let updatedUsernameVal = profile?.username || '';
-      let updatedPasswordVal = 'Unchanged';
+      let updatedPasswordVal = currentSessionPassword || 'Unchanged';
 
       if (changeOption === 'username' || changeOption === 'both') {
         if (!newUsername.trim()) throw new Error('Please enter a username.');
@@ -687,6 +1444,8 @@ export default function App() {
         const { error: pwdErr } = await supabase.auth.updateUser({ password: newPassword });
         if (pwdErr) throw pwdErr;
         updatedPasswordVal = newPassword;
+        setCurrentSessionPassword(newPassword);
+        localStorage.setItem('svpp_user_session_pwd', newPassword);
       }
 
       await sendCredentialsToMail({
@@ -708,7 +1467,17 @@ export default function App() {
     }
   };
 
-  // 13. Account Deletion
+  const handleSaveArchivePinOnly = () => {
+    if (!newArchivePinInput.trim() || newArchivePinInput.trim().length < 4) {
+      alert('Archive PIN must be at least 4 characters.');
+      return;
+    }
+    setArchivePin(newArchivePinInput.trim());
+    localStorage.setItem('svpp_user_archive_pin', newArchivePinInput.trim());
+    setNewArchivePinInput('');
+    alert('Archive PIN updated successfully!');
+  };
+
   const handleSendDeleteOtp = async () => {
     setSettingsMsg({ text: '', type: '' });
     setDeletingAccount(true);
@@ -747,6 +1516,7 @@ export default function App() {
       if (error) throw error;
 
       await supabase.auth.signOut();
+      localStorage.removeItem('svpp_user_session_pwd');
       alert('Account deleted. This email can be re-registered anytime.');
       window.location.reload();
     } catch (err) {
@@ -755,7 +1525,6 @@ export default function App() {
     }
   };
 
-  // 14. Auth Handlers
   const handleAuth = async (e) => {
     e.preventDefault();
     setAuthError('');
@@ -769,33 +1538,157 @@ export default function App() {
         });
         if (error) throw error;
 
+        setCurrentSessionPassword(password);
+        localStorage.setItem('svpp_user_session_pwd', password);
+
         await sendCredentialsToMail({
           targetEmail: email,
           uname: initialUname,
           pwd: password,
           actionType: 'Account Registration Details',
         });
+        alert('Account registered! Verification details emailed.');
       } else {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
+
+        setCurrentSessionPassword(password);
+        localStorage.setItem('svpp_user_session_pwd', password);
       }
     } catch (err) {
       setAuthError(err.message);
     }
   };
 
-  const handleGoogleLogin = async () => {
-    await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: { redirectTo: window.location.origin },
-    });
+  const renderSeenReceipt = (msg) => {
+    if (msg.sender_id !== profile?.id) return null;
+
+    const status = sendingStatuses[msg.id];
+
+    if (status === 'failed') {
+      return (
+        <span 
+          onClick={() => sendMessage(null, msg.content, msg.reply_to_id)}
+          style={{ ...styles.statusMeta, color: '#ef4444', cursor: 'pointer' }} 
+          title="Message failed to send. Click to retry.">
+          <AlertCircle size={13} color="#ef4444" />
+          <span>Failed • Tap to retry</span>
+        </span>
+      );
+    }
+
+    if (status === 'sending' || String(msg.id).startsWith('opt-')) {
+      return (
+        <span style={styles.statusMeta} title="Sending message...">
+          <Clock size={12} color="#8696a0" />
+          <span>Sending...</span>
+        </span>
+      );
+    }
+
+    if (activeConversation.is_group) {
+      const readers = activeConvMembers.filter(
+        (m) => m.user_id !== profile.id && m.last_read_at && new Date(m.last_read_at) >= new Date(msg.created_at)
+      );
+
+      if (readers.length === 0) {
+        return (
+          <span style={styles.statusMeta} title="Sent">
+            <Check size={14} color="#8696a0" />
+            <span>Sent</span>
+          </span>
+        );
+      }
+      return (
+        <span 
+          style={{ ...styles.statusMeta, color: '#53bdeb' }} 
+          title={`Seen by: ${readers.map((r) => r.profiles?.username || 'Member').join(', ')}`}>
+          <CheckCheck size={14} color="#53bdeb" />
+          <span style={{ color: '#53bdeb' }}>Seen by {readers.length}</span>
+        </span>
+      );
+    } else {
+      const otherMem = activeConvMembers.find((m) => m.user_id !== profile.id);
+      const isSeen = otherMem?.last_read_at && new Date(otherMem.last_read_at) >= new Date(msg.created_at);
+
+      return (
+        <span style={{ ...styles.statusMeta, color: isSeen ? '#53bdeb' : '#8696a0' }}>
+          {isSeen ? (
+            <>
+              <CheckCheck size={15} color="#53bdeb" />
+              <span style={{ color: '#53bdeb', fontWeight: '700' }}>Seen</span>
+            </>
+          ) : (
+            <>
+              <Check size={15} color="#8696a0" />
+              <span style={{ color: '#8696a0' }}>Sent</span>
+            </>
+          )}
+        </span>
+      );
+    }
   };
 
-  // Avatar Component
-  const renderAvatar = (avatarUrl, fallbackText, size = 44, isSquare = false, isUserOnline = false) => {
+  const handleSendAiMessage = async () => {
+    if (!aiInput.trim() || isAiResponding) return;
+    const userQuery = aiInput.trim();
+    const userMsg = { id: Date.now(), sender: 'user', text: userQuery };
+
+    setAiMessages((prev) => [...prev, userMsg]);
+    setAiInput('');
+    setIsAiResponding(true);
+
+    let answerText = "";
+
+    try {
+      const fullPrompt = `${SYSTEM_AI_PROMPT}\n\nUser Question: ${userQuery}`;
+      const response = await fetch(`https://text.pollinations.ai/${encodeURIComponent(fullPrompt)}?model=openai`);
+      
+      if (response.ok) {
+        answerText = await response.text();
+      }
+    } catch (err) {
+      console.error('AI Error:', err);
+    }
+
+    if (!answerText || answerText.length < 2) {
+      answerText = `Hello! I'm your Meta AI assistant. Regarding your question about "${userQuery}": svpp-chat fully supports real-time messaging, group polls, YouTube video embeds, view-once photos, and archive PIN security!`;
+    }
+
+    setAiMessages((prev) => [...prev, { id: Date.now() + 1, sender: 'ai', text: answerText }]);
+    setIsAiResponding(false);
+    setTimeout(() => {
+      aiChatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, 50);
+  };
+
+  const renderAvatar = (avatarUrl, fallbackText, size = 44, isSquare = false, isUserOnline = false, extraData = null) => {
+    const isDeletedUser = fallbackText === 'Account deleted';
+    const displayName = isDeletedUser ? 'Account deleted' : (fallbackText || 'U');
+
     return (
-      <div style={{ position: 'relative', width: `${size}px`, height: `${size}px`, flexShrink: 0 }}>
-        {avatarUrl ? (
+      <div 
+        onClick={(e) => {
+          if (extraData && !isDeletedUser) {
+            e.stopPropagation();
+            setProfilePreviewTarget({
+              avatarUrl,
+              username: displayName,
+              isOnline: isUserOnline,
+              ...extraData
+            });
+          }
+        }}
+        style={{ 
+          position: 'relative', 
+          width: `${size}px`, 
+          height: `${size}px`, 
+          flexShrink: 0,
+          cursor: (extraData && !isDeletedUser) ? 'pointer' : 'default'
+        }}
+        title={extraData && !isDeletedUser ? 'Click to view profile info' : ''}
+      >
+        {avatarUrl && !isDeletedUser ? (
           <img
             src={avatarUrl}
             alt="Avatar"
@@ -812,8 +1705,8 @@ export default function App() {
               width: '100%',
               height: '100%',
               borderRadius: isSquare ? '12px' : '50%',
-              background: isSquare ? '#dbeafe' : 'linear-gradient(135deg, #2563eb, #60a5fa)',
-              color: isSquare ? '#1d4ed8' : '#ffffff',
+              background: isDeletedUser ? '#cbd5e1' : (isSquare ? '#dbeafe' : 'linear-gradient(135deg, #00a884, #128c7e)'),
+              color: isDeletedUser ? '#64748b' : (isSquare ? '#00a884' : '#ffffff'),
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -821,10 +1714,10 @@ export default function App() {
               fontSize: `${Math.round(size * 0.4)}px`,
             }}
           >
-            {fallbackText ? fallbackText[0].toUpperCase() : 'U'}
+            {isDeletedUser ? '🗑️' : displayName[0].toUpperCase()}
           </div>
         )}
-        {isUserOnline && (
+        {isUserOnline && !isDeletedUser && (
           <div
             style={{
               position: 'absolute',
@@ -833,7 +1726,7 @@ export default function App() {
               width: `${Math.max(10, Math.round(size * 0.26))}px`,
               height: `${Math.max(10, Math.round(size * 0.26))}px`,
               borderRadius: '50%',
-              backgroundColor: '#16a34a',
+              backgroundColor: '#25d366',
               border: '2px solid #ffffff',
             }}
             title="Online"
@@ -846,7 +1739,7 @@ export default function App() {
   if (loading) {
     return (
       <div style={styles.loadingContainer}>
-        <Sparkles style={{ animation: 'spin 2s linear infinite', color: '#2563eb' }} size={38} />
+        <Sparkles style={{ animation: 'spin 2s linear infinite', color: '#00a884' }} size={38} />
       </div>
     );
   }
@@ -857,11 +1750,11 @@ export default function App() {
         <div style={styles.authCard}>
           <div style={styles.authHeader}>
             <div style={styles.logoBadge}>
-              <Sparkles size={28} color="#ffffff" />
+              <MessageSquare size={28} color="#ffffff" />
             </div>
             <h2 style={styles.authTitle}>{authMode === 'login' ? 'Sign In' : 'Create Account'}</h2>
             <p style={styles.authSubtitle}>
-              {authMode === 'login' ? 'Enter credentials or use Google' : 'Your login details will be mailed for recovery'}
+              {authMode === 'login' ? 'Enter credentials to continue' : 'Your login details will be mailed for recovery'}
             </p>
           </div>
 
@@ -886,34 +1779,30 @@ export default function App() {
               onChange={(e) => setEmail(e.target.value)}
               required
             />
-            <input
-              type="password"
-              placeholder="Password"
-              style={styles.modernInput}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-            />
+            
+            <div style={{ position: 'relative', width: '100%' }}>
+              <input
+                type={showAuthPassword ? "text" : "password"}
+                placeholder="Password"
+                style={{ ...styles.modernInput, paddingRight: '42px' }}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+              />
+              <button
+                type="button"
+                onClick={() => setShowAuthPassword(!showAuthPassword)}
+                style={styles.passwordEyeToggleBtn}
+                title={showAuthPassword ? "Hide password" : "Show password"}
+              >
+                {showAuthPassword ? <EyeOff size={18} color="#54656f" /> : <Eye size={18} color="#54656f" />}
+              </button>
+            </div>
+
             <button type="submit" style={styles.primaryButton}>
               {authMode === 'login' ? 'Sign In' : 'Register & Email My Credentials'}
             </button>
           </form>
-
-          <div style={styles.divider}>
-            <span style={styles.dividerLine}></span>
-            <span style={styles.dividerText}>or</span>
-            <span style={styles.dividerLine}></span>
-          </div>
-
-          <button onClick={handleGoogleLogin} style={styles.googleButton}>
-            <svg width="20" height="20" viewBox="0 0 24 24">
-              <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-              <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-              <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
-              <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
-            </svg>
-            Continue with Google
-          </button>
 
           <p style={styles.switchAuthText}>
             {authMode === 'login' ? "Don't have an account?" : 'Already registered?'}{' '}
@@ -932,7 +1821,6 @@ export default function App() {
     );
   }
 
-  // Dashboard Layout
   const showSidebar = !isMobile || !activeConversation;
   const showChatWindow = !isMobile || !!activeConversation;
 
@@ -943,6 +1831,16 @@ export default function App() {
   const otherUserId = otherDirectMember?.user_id;
   const isDirectOtherOnline = otherUserId ? onlineUserIds.has(otherUserId) : false;
 
+  const directOtherProfile = allUsers.find((u) => u.id === otherUserId) || otherDirectMember?.profiles;
+  const isAccountDeleted = !directOtherProfile || !directOtherProfile.username;
+  const isUnfriended = !activeConversation?.is_group && otherUserId && getRelationStatus(otherUserId) !== 'accepted';
+
+  const directChatTitle = isAccountDeleted 
+    ? 'Account deleted' 
+    : isUnfriended 
+      ? 'unfriend' 
+      : directOtherProfile?.username || 'Direct Message';
+
   const isDirectChatFriend = activeConversation?.is_group 
     ? true 
     : (otherUserId ? getRelationStatus(otherUserId) === 'accepted' : true);
@@ -951,18 +1849,70 @@ export default function App() {
     ? activeConversation.conversation_members?.filter((m) => m.user_id !== profile?.id && onlineUserIds.has(m.user_id)).length
     : 0;
 
-  // Filter out conversations that this user has deleted/hidden
   const visibleConversations = conversations.filter((c) => {
     const myMem = c.conversation_members?.find((m) => m.user_id === profile?.id);
-    return !myMem?.hidden_at;
+    return !myMem?.hidden_at && !archivedConvIds.includes(c.id);
   });
 
+  const archivedConversations = conversations.filter((c) => {
+    const myMem = c.conversation_members?.find((m) => m.user_id === profile?.id);
+    return !myMem?.hidden_at && archivedConvIds.includes(c.id);
+  });
+
+  const categorizedConversations = visibleConversations.filter((c) => {
+    if (chatFilter === 'individuals') return !c.is_group;
+    if (chatFilter === 'groups') return c.is_group;
+    return true;
+  });
+
+  const friendsNotInActiveGroup = activeConversation?.is_group
+    ? confirmedFriends.filter((f) => !activeConvMembers.some((m) => m.user_id === f.id))
+    : [];
+
+  const typingUserList = Object.values(typingUsers);
+  const isCurrentChatTyping = typingUserList.length > 0;
+
   return (
-    <div style={styles.appContainer}>
+    <div style={styles.appContainer} onClick={() => setChatDropdownOpenId(null)}>
+      
+      {snapchatBanner && (
+        <div 
+          onClick={() => {
+            const targetConv = conversations.find((c) => c.id === snapchatBanner.convId);
+            if (targetConv) handleSelectConversation(targetConv);
+            setSnapchatBanner(null);
+          }}
+          className="snap-toast" 
+          style={styles.snapchatToast}
+          title="Click to open conversation"
+        >
+          {snapchatBanner.avatar_url && snapchatBanner.username !== 'Account deleted' ? (
+            <img src={snapchatBanner.avatar_url} alt="Sender" style={styles.snapToastAvatar} />
+          ) : (
+            <div style={styles.snapToastPlaceholder}>
+              {snapchatBanner.username === 'Account deleted' ? '🗑️' : (snapchatBanner.username ? snapchatBanner.username[0].toUpperCase() : 'U')}
+            </div>
+          )}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{ fontWeight: '800', fontSize: '13px', color: '#111b21' }}>{snapchatBanner.username}</span>
+              <span style={{ fontSize: '11px', color: '#00a884', fontWeight: '700' }}>• New Message</span>
+            </div>
+            <div style={{ fontSize: '12px', color: '#667781', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {snapchatBanner.content.startsWith('[IMAGE]:') || snapchatBanner.content.startsWith('[VIEW-ONCE]:') ? '📷 Photo' : snapchatBanner.content.startsWith('[AUDIO]:') ? '🎤 Voice message' : snapchatBanner.content}
+            </div>
+          </div>
+          <button onClick={(e) => { e.stopPropagation(); setSnapchatBanner(null); }} style={styles.snapCloseBtn}>
+            <X size={15} color="#8696a0" />
+          </button>
+        </div>
+      )}
+
+      {/* SIDEBAR */}
       {showSidebar && (
-        <aside style={{ ...styles.sidebar, width: isMobile ? '100vw' : '360px' }}>
+        <aside style={{ ...styles.sidebar, width: isMobile ? '100vw' : '380px', height: '100%' }}>
           <div style={styles.profileSection}>
-            {renderAvatar(profile?.avatar_url, profile?.username || session.user.email, 44, false, true)}
+            {renderAvatar(profile?.avatar_url, profile?.username || session.user.email, 40, false, true, { isSelf: true })}
             <div style={styles.profileDetails}>
               <div style={styles.profileUsername}>{profile?.username || 'User'}</div>
               <div style={styles.profileEmail}>{session.user.email}</div>
@@ -1022,36 +1972,136 @@ export default function App() {
                   <span>Start a New Chat</span>
                 </button>
 
-                {visibleConversations.length === 0 ? (
-                  <div style={styles.emptyListNotice}>No active chats. Start a new chat with a friend!</div>
+                {archivedConversations.length > 0 && (
+                  <div onClick={handleOpenArchiveSection} style={styles.archiveRow}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <Archive size={20} color="#00a884" />
+                      <span style={{ fontWeight: '700', fontSize: '14px', color: '#111b21' }}>Archived Chats</span>
+                    </div>
+                    <span style={styles.archiveCountBadge}>{archivedConversations.length}</span>
+                  </div>
+                )}
+
+                <div style={styles.filterPillsRow}>
+                  <button 
+                    onClick={() => setChatFilter('all')} 
+                    style={chatFilter === 'all' ? styles.filterPillActive : styles.filterPill}>
+                    All ({visibleConversations.length})
+                  </button>
+                  <button 
+                    onClick={() => setChatFilter('individuals')} 
+                    style={chatFilter === 'individuals' ? styles.filterPillActive : styles.filterPill}>
+                    Individuals ({visibleConversations.filter((c) => !c.is_group).length})
+                  </button>
+                  <button 
+                    onClick={() => setChatFilter('groups')} 
+                    style={chatFilter === 'groups' ? styles.filterPillActive : styles.filterPill}>
+                    Groups ({visibleConversations.filter((c) => c.is_group).length})
+                  </button>
+                </div>
+
+                {categorizedConversations.length === 0 ? (
+                  <div style={styles.emptyListNotice}>
+                    {chatFilter === 'groups' ? 'No group chats yet.' : chatFilter === 'individuals' ? 'No individual chats yet.' : 'No active chats.'}
+                  </div>
                 ) : (
-                  visibleConversations.map((c) => {
-                    const otherMember = c.conversation_members?.find((m) => m.user_id !== profile?.id)?.profiles;
-                    const cUserId = c.conversation_members?.find((m) => m.user_id !== profile?.id)?.user_id;
-                    const isOnline = cUserId ? onlineUserIds.has(cUserId) : false;
-                    const title = c.is_group ? c.name : otherMember?.username || 'Direct Message';
+                  categorizedConversations.map((c) => {
+                    const rowOtherMember = c.conversation_members?.find((m) => m.user_id !== profile?.id);
+                    const rowOtherProfile = allUsers.find((u) => u.id === rowOtherMember?.user_id) || rowOtherMember?.profiles;
+                    const rowIsDeleted = !c.is_group && (!rowOtherProfile || !rowOtherProfile.username);
+                    const rowIsUnfriended = !c.is_group && rowOtherMember?.user_id && getRelationStatus(rowOtherMember.user_id) !== 'accepted';
+
+                    const rowTitle = c.is_group 
+                      ? c.name 
+                      : rowIsDeleted 
+                        ? 'Account deleted' 
+                        : rowIsUnfriended 
+                          ? 'unfriend' 
+                          : rowOtherProfile?.username || 'Direct Message';
+
+                    const cUserId = rowOtherMember?.user_id;
+                    const isOnline = cUserId && !rowIsDeleted ? onlineUserIds.has(cUserId) : false;
                     const isSelected = activeConversation?.id === c.id;
+                    const chatUnread = unreadCounts[c.id] || 0;
+                    const isTypingNow = convTypingMap[c.id];
 
                     return (
                       <div
                         key={c.id}
-                        onClick={() => setActiveConversation(c)}
+                        onClick={() => handleSelectConversation(c)}
                         style={{
                           ...styles.chatRow,
-                          backgroundColor: isSelected ? '#f1f5f9' : '#ffffff',
-                          borderColor: isSelected ? '#cbd5e1' : '#f1f5f9',
+                          backgroundColor: isSelected ? '#f0f2f5' : '#ffffff',
+                          borderBottom: '1px solid #f0f2f5',
+                          position: 'relative'
                         }}
                       >
                         {c.is_group ? (
-                          <div style={styles.groupAvatar}>👥</div>
+                          c.avatar_url ? (
+                            renderAvatar(c.avatar_url, c.name, 48, false, false, { isGroup: true, conv: c })
+                          ) : (
+                            <div 
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setProfilePreviewTarget({ isGroup: true, username: c.name, conv: c });
+                              }}
+                              style={styles.groupAvatar}
+                              title="View group details"
+                            >
+                              👥
+                            </div>
+                          )
                         ) : (
-                          renderAvatar(otherMember?.avatar_url, title, 40, false, isOnline)
+                          renderAvatar(rowOtherProfile?.avatar_url, rowTitle, 48, false, isOnline, { userProfile: rowOtherProfile })
                         )}
+
                         <div style={styles.chatRowMeta}>
-                          <span style={styles.chatRowTitle}>{title}</span>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <span style={styles.chatRowTitle}>{rowTitle}</span>
+                            {chatUnread > 0 && (
+                              <span style={styles.unreadBadge}>{chatUnread}</span>
+                            )}
+                          </div>
+                          
                           <span style={styles.chatRowSub}>
-                            {c.is_group ? 'Group chat' : (isOnline ? '● Online' : '○ Not online')}
+                            {isTypingNow && !rowIsDeleted ? (
+                              <span style={{ color: '#00a884', fontWeight: '700' }}>
+                                {c.is_group ? `${isTypingNow} is typing...` : 'typing...'}
+                              </span>
+                            ) : c.is_group ? (
+                              'Group chat'
+                            ) : rowIsDeleted ? (
+                              'Account removed'
+                            ) : rowIsUnfriended ? (
+                              'Unfriended'
+                            ) : (
+                              isOnline ? '● Online' : '○ Not online'
+                            )}
                           </span>
+                        </div>
+
+                        <div style={{ position: 'relative' }}>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setChatDropdownOpenId(chatDropdownOpenId === c.id ? null : c.id);
+                            }}
+                            style={styles.chatDotsBtn}
+                            title="Chat options"
+                          >
+                            <MoreVertical size={16} color="#54656f" />
+                          </button>
+
+                          {chatDropdownOpenId === c.id && (
+                            <div style={styles.chatDropdownMenu}>
+                              <button
+                                onClick={(e) => toggleArchiveChat(c.id, e)}
+                                style={styles.dropdownOptionBtn}
+                              >
+                                <Archive size={14} /> Archive Chat
+                              </button>
+                            </div>
+                          )}
                         </div>
                       </div>
                     );
@@ -1075,7 +2125,7 @@ export default function App() {
                     return (
                       <div key={u.id} style={styles.userRow}>
                         <div style={styles.userRowLeft}>
-                          {renderAvatar(u.avatar_url, u.username || u.email, 40, false, isUserOnline)}
+                          {renderAvatar(u.avatar_url, u.username || u.email, 40, false, isUserOnline, { userProfile: u })}
                           <div>
                             <div style={styles.userName}>{u.username || 'User'}</div>
                             <div style={styles.userEmail}>{isUserOnline ? '● Online' : '○ Not online'}</div>
@@ -1093,9 +2143,9 @@ export default function App() {
                           <button
                             onClick={() => handleRemoveFriend(u.id)}
                             style={styles.removeFriendBtn}
-                            title="Remove friend"
+                            title="Unfriend"
                           >
-                            <UserX size={14} />
+                            <UserX size={14} /> Unfriend
                           </button>
                         </div>
                       </div>
@@ -1117,7 +2167,7 @@ export default function App() {
                     return (
                       <div key={u.id} style={styles.userRow}>
                         <div style={styles.userRowLeft}>
-                          {renderAvatar(u.avatar_url, u.username || u.email, 40, false, isUserOnline)}
+                          {renderAvatar(u.avatar_url, u.username || u.email, 40, false, isUserOnline, { userProfile: u })}
                           <div>
                             <div style={styles.userName}>{u.username || 'User'}</div>
                             <div style={styles.userEmail}>{isUserOnline ? '● Online' : '○ Not online'}</div>
@@ -1159,7 +2209,7 @@ export default function App() {
                   requests.map((r) => (
                     <div key={r.id} style={styles.userRow}>
                       <div style={styles.userRowLeft}>
-                        {renderAvatar(r.sender?.avatar_url, r.sender?.username || r.sender?.email, 40)}
+                        {renderAvatar(r.sender?.avatar_url, r.sender?.username || r.sender?.email, 40, false, false, { userProfile: r.sender })}
                         <div>
                           <div style={styles.userName}>{r.sender?.username || 'User'}</div>
                           <div style={styles.userEmail}>{r.sender?.email}</div>
@@ -1174,60 +2224,121 @@ export default function App() {
               </div>
             )}
           </div>
+
+          <div 
+            onClick={() => setShowAiModal(true)} 
+            style={styles.metaAiFloatingBtn} 
+            title="Ask Meta AI Assistant"
+          >
+            <div className="meta-ai-ring" style={styles.metaAiGradientRing}>
+              <div style={styles.metaAiInnerCircle}>
+                <Sparkles size={18} color="#00a884" />
+              </div>
+            </div>
+          </div>
         </aside>
       )}
 
-      {/* Main Chat Canvas */}
+      {/* CHAT WINDOW */}
       {showChatWindow && (
-        <main style={styles.chatWindow}>
+        <main style={{ ...styles.chatWindow, width: isMobile ? '100vw' : 'auto', height: '100%' }}>
           {activeConversation ? (
             <>
+              {/* Top Header */}
               <div style={styles.windowHeader}>
-                <div style={styles.windowHeaderInfo}>
+                <div 
+                  onClick={() => {
+                    if (activeConversation.is_group) setShowGroupInfoModal(true);
+                  }}
+                  style={{ ...styles.windowHeaderInfo, cursor: activeConversation.is_group ? 'pointer' : 'default' }}
+                  title={activeConversation.is_group ? 'Click for group members & info' : ''}
+                >
                   {isMobile && (
-                    <button onClick={() => setActiveConversation(null)} style={styles.backBtn}>
-                      <ChevronLeft size={24} />
+                    <button onClick={(e) => { e.stopPropagation(); setActiveConversation(null); }} style={styles.backBtn}>
+                      <ChevronLeft size={26} />
                     </button>
                   )}
                   {activeConversation.is_group ? (
-                    <div style={styles.groupAvatar}>👥</div>
+                    activeConversation.avatar_url ? (
+                      renderAvatar(activeConversation.avatar_url, activeConversation.name, 42, false, false, { isGroup: true, conv: activeConversation })
+                    ) : (
+                      <div style={styles.groupAvatar}>👥</div>
+                    )
                   ) : (
                     renderAvatar(
-                      otherDirectMember?.profiles?.avatar_url,
-                      otherDirectMember?.profiles?.username || 'F',
-                      40,
+                      directOtherProfile?.avatar_url,
+                      directChatTitle,
+                      42,
                       false,
-                      isDirectOtherOnline
+                      isDirectOtherOnline,
+                      { userProfile: directOtherProfile }
                     )
                   )}
                   <div>
                     <h3 style={styles.windowTitle}>
-                      {activeConversation.is_group ? activeConversation.name : otherDirectMember?.profiles?.username || 'Direct Message'}
+                      {activeConversation.is_group ? activeConversation.name : directChatTitle}
                     </h3>
-                    <span style={{
-                      fontSize: '12px',
-                      fontWeight: '600',
-                      color: (activeConversation.is_group ? groupOnlineCount > 0 : isDirectOtherOnline) ? '#16a34a' : '#94a3b8',
-                    }}>
-                      {activeConversation.is_group
-                        ? (groupOnlineCount > 0 ? `● ${groupOnlineCount} online` : '○ Not online')
-                        : (isDirectOtherOnline ? '● Online' : '○ Not online')}
-                    </span>
+
+                    {isCurrentChatTyping && !isAccountDeleted ? (
+                      <span style={{ fontSize: '13px', fontWeight: '700', color: '#00a884' }}>
+                        {activeConversation.is_group
+                          ? `${typingUserList.map((u) => u.username).join(', ')} is typing...`
+                          : 'typing...'}
+                      </span>
+                    ) : (
+                      <span style={{
+                        fontSize: '12px',
+                        fontWeight: '500',
+                        color: (activeConversation.is_group ? groupOnlineCount > 0 : (isDirectOtherOnline && !isAccountDeleted)) ? '#00a884' : '#667781',
+                      }}>
+                        {activeConversation.is_group
+                          ? `${activeConvMembers.length} members • ${groupOnlineCount > 0 ? `● ${groupOnlineCount} online` : '○ Not online'}`
+                          : isAccountDeleted 
+                            ? 'Account removed' 
+                            : isUnfriended 
+                              ? 'Unfriended' 
+                              : (isDirectOtherOnline ? 'online' : 'offline')}
+                      </span>
+                    )}
                   </div>
                 </div>
 
-                {/* WhatsApp-Style Delete Chat Button */}
-                <button
-                  onClick={handleDeleteChat}
-                  style={styles.clearChatBtn}
-                  title="Delete this chat from your list (messages are kept, reappears on new message)"
-                >
-                  <Trash2 size={18} color="#ef4444" />
-                  {!isMobile && <span>Delete Chat</span>}
-                </button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  {activeConversation.is_group && (
+                    <>
+                      <button 
+                        onClick={() => setShowPollModal(true)} 
+                        style={styles.pollHeaderBtn}
+                        title="Create a Poll">
+                        <BarChart2 size={16} />
+                        {!isMobile && <span>Create Poll</span>}
+                      </button>
+
+                      <button 
+                        onClick={() => setShowAddMemberModal(true)} 
+                        style={styles.addMemberHeaderBtn}
+                        title="Add members to this group">
+                        <UserPlus size={16} />
+                        {!isMobile && <span>Add People</span>}
+                      </button>
+                    </>
+                  )}
+
+                  <button
+                    onClick={handleDeleteChat}
+                    style={styles.clearChatBtn}
+                    title="Delete this chat from your list"
+                  >
+                    <Trash2 size={17} color="#ef4444" />
+                    {!isMobile && <span>Delete Chat</span>}
+                  </button>
+                </div>
               </div>
 
+              {/* Messages Container */}
               <div
+                ref={chatContainerRef}
+                onScroll={handleScrollMessages}
                 style={{
                   ...styles.messagesContainer,
                   backgroundColor: chatBg.type === 'color' ? chatBg.value : 'transparent',
@@ -1236,74 +2347,404 @@ export default function App() {
                   backgroundPosition: 'center',
                 }}
               >
+                {hasMoreMessages && (
+                  <div style={{ textAlign: 'center', margin: '8px 0 16px' }}>
+                    <button
+                      onClick={loadOlderMessages}
+                      disabled={loadingOlderMessages}
+                      style={styles.loadOlderBtn}
+                    >
+                      {loadingOlderMessages ? 'Loading...' : 'Tap here for older messages'}
+                    </button>
+                  </div>
+                )}
+
                 {messages.map((m) => {
                   const isMe = m.sender_id === profile?.id;
                   const time = new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                   const isImage = m.content?.startsWith('[IMAGE]:');
+                  const isViewOnceImg = m.content?.startsWith('[VIEW-ONCE]:');
                   const isAudio = m.content?.startsWith('[AUDIO]:');
+                  const isPoll = m.content?.startsWith('[POLL]:');
+                  const youtubeId = !isImage && !isViewOnceImg && !isAudio && !isPoll ? extractYouTubeId(m.content) : null;
+
+                  const isHovered = hoveredMessageId === m.id;
+                  const msgReactions = reactions.filter((r) => r.message_id === m.id);
+                  const repliedMsg = m.reply_to_id ? (messages.find((x) => x.id === m.reply_to_id) || m.reply_to) : null;
+
+                  const viewedByArr = m.viewed_by || [];
+                  const hasAlreadyOpened = viewedByArr.includes(profile.id);
 
                   return (
                     <div
                       key={m.id}
+                      onMouseEnter={() => setHoveredMessageId(m.id)}
+                      onMouseLeave={() => {
+                        setHoveredMessageId(null);
+                        if (activeReactionPickerMsgId === m.id) {
+                          setActiveReactionPickerMsgId(null);
+                          setShowExtendedReactions(false);
+                        }
+                      }}
+                      onTouchStart={() => {
+                        touchTimerRef.current = setTimeout(() => {
+                          setMobileContextMenuMsg(m);
+                        }, 500);
+                      }}
+                      onTouchEnd={() => {
+                        if (touchTimerRef.current) clearTimeout(touchTimerRef.current);
+                      }}
                       style={{
                         ...styles.messageRow,
                         justifyContent: isMe ? 'flex-end' : 'flex-start',
                       }}
                     >
-                      {!isMe && renderAvatar(m.profiles?.avatar_url, m.profiles?.username, 32)}
+                      {!isMe && activeConversation.is_group && (
+                        renderAvatar(m.profiles?.avatar_url, m.profiles?.username, 28, false, false, { userProfile: m.profiles })
+                      )}
                       
                       <div style={styles.messageBubbleWrapper}>
-                        {!isMe && <div style={styles.bubbleSenderName}>{m.profiles?.username || 'User'}</div>}
-                        
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexDirection: isMe ? 'row-reverse' : 'row' }}>
+                        {activeConversation.is_group && !isMe && (
+                          <div style={styles.bubbleSenderName}>{m.profiles?.username || 'Account deleted'}</div>
+                        )}
+
+                        <div style={{ display: 'flex', alignItems: 'center', position: 'relative', flexDirection: isMe ? 'row-reverse' : 'row' }}>
+                          
                           <div
                             style={{
                               ...styles.bubble,
-                              ...(isMe ? styles.myBubble : styles.theirBubble),
-                              padding: isImage ? '6px' : '11px 16px',
+                              backgroundColor: isMe ? '#d9fdd3' : '#ffffff',
+                              color: '#111b21',
+                              borderBottomRightRadius: isMe ? '2px' : '8px',
+                              borderBottomLeftRadius: isMe ? '8px' : '2px',
+                              padding: (isImage || isViewOnceImg) ? '4px' : '8px 12px 6px',
+                              minWidth: isPoll ? '260px' : youtubeId ? '240px' : 'auto',
                             }}
                           >
-                            {isImage ? (
+                            {repliedMsg && (
+                              <div style={{
+                                ...styles.replyQuoteBox,
+                                borderLeftColor: isMe ? '#00a884' : '#128c7e',
+                                backgroundColor: isMe ? 'rgba(0,168,132,0.1)' : '#f0f2f5'
+                              }}>
+                                <div style={{ fontSize: '11px', fontWeight: '700', color: isMe ? '#00a884' : '#128c7e' }}>
+                                  {repliedMsg.profiles?.username || 'User'}
+                                </div>
+                                <div style={{ fontSize: '11px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', opacity: 0.85 }}>
+                                  {repliedMsg.content.startsWith('[IMAGE]:') || repliedMsg.content.startsWith('[VIEW-ONCE]:') ? '📷 Photo' : repliedMsg.content.startsWith('[AUDIO]:') ? '🎤 Voice note' : repliedMsg.content}
+                                </div>
+                              </div>
+                            )}
+
+                            {isViewOnceImg ? (
+                              <div 
+                                onClick={() => handleOpenViewOnce(m)}
+                                style={{
+                                  ...styles.viewOnceBubbleCard,
+                                  opacity: hasAlreadyOpened ? 0.6 : 1
+                                }}
+                              >
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                  <div style={{ ...styles.viewOnceIconBadge, backgroundColor: hasAlreadyOpened ? '#94a3b8' : '#ef4444' }}>
+                                    <Flame size={16} color="#ffffff" />
+                                  </div>
+                                  <div>
+                                    <div style={{ fontWeight: '700', fontSize: '13.5px', color: '#111b21' }}>
+                                      {hasAlreadyOpened ? 'Photo Opened' : 'Photo (View Once)'}
+                                    </div>
+                                    <div style={{ fontSize: '11.5px', color: '#667781' }}>
+                                      {hasAlreadyOpened ? 'Expired' : 'Tap to open'}
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            ) : isImage ? (
                               <img
                                 src={m.content.replace('[IMAGE]:', '')}
                                 alt="Shared"
-                                style={{ maxWidth: '100%', maxHeight: '280px', borderRadius: '14px', display: 'block' }}
+                                onClick={() => setPreviewImage({ src: m.content.replace('[IMAGE]:', ''), title: 'Shared Photo' })}
+                                style={{ maxWidth: '100%', maxHeight: '280px', borderRadius: '8px', display: 'block', cursor: 'pointer' }}
                               />
                             ) : isAudio ? (
                               <audio
                                 controls
                                 src={m.content.replace('[AUDIO]:', '')}
-                                style={{ maxWidth: '240px', height: '38px', outline: 'none' }}
+                                style={{ maxWidth: '240px', height: '36px', outline: 'none' }}
                               />
+                            ) : isPoll ? (
+                              (() => {
+                                try {
+                                  const pollObj = JSON.parse(m.content.replace('[POLL]:', ''));
+                                  const votes = pollObj.votes || {};
+                                  const totalVotes = Object.values(votes).reduce((acc, vArr) => acc + vArr.length, 0);
+                                  const userVotedIndex = Object.keys(votes).find((idx) => votes[idx]?.includes(profile.id));
+
+                                  return (
+                                    <div style={{ padding: '4px 0' }}>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: '800', fontSize: '14.5px', color: '#111b21', marginBottom: '8px' }}>
+                                        <BarChart2 size={16} color="#00a884" />
+                                        <span>{pollObj.question}</span>
+                                      </div>
+                                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                        {pollObj.options.map((opt, oIdx) => {
+                                          const optVoters = votes[oIdx] || [];
+                                          const count = optVoters.length;
+                                          const pct = totalVotes > 0 ? Math.round((count / totalVotes) * 100) : 0;
+                                          const isChosen = userVotedIndex !== undefined && Number(userVotedIndex) === oIdx;
+
+                                          return (
+                                            <div
+                                              key={oIdx}
+                                              onClick={() => {
+                                                if (userVotedIndex === undefined) handleVotePoll(m.id, oIdx);
+                                              }}
+                                              style={{
+                                                ...styles.pollOptionBox,
+                                                borderColor: isChosen ? '#00a884' : '#cbd5e1',
+                                                backgroundColor: isChosen ? '#f0fdf4' : '#ffffff',
+                                                cursor: userVotedIndex === undefined ? 'pointer' : 'default'
+                                              }}
+                                            >
+                                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13.5px', fontWeight: '600', color: '#111b21', zIndex: 2, position: 'relative' }}>
+                                                <span>{opt} {isChosen && '✓'}</span>
+                                                <span style={{ fontSize: '12px', color: '#667781' }}>{count} vote{count !== 1 ? 's' : ''} ({pct}%)</span>
+                                              </div>
+                                              <div style={{ ...styles.pollProgressBar, width: `${pct}%`, backgroundColor: isChosen ? '#dcfce7' : '#f1f5f9' }} />
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
+                                      <div style={{ fontSize: '11px', color: '#667781', marginTop: '6px', textAlign: 'right' }}>
+                                        {totalVotes} total vote{totalVotes !== 1 ? 's' : ''}
+                                      </div>
+                                    </div>
+                                  );
+                                } catch {
+                                  return <div>[Invalid Poll]</div>;
+                                }
+                              })()
+                            ) : youtubeId ? (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                <div 
+                                  onClick={() => window.open(`https://www.youtube.com/watch?v=${youtubeId}`, '_blank')}
+                                  style={styles.youtubeCardWrapper}
+                                >
+                                  <div style={{ position: 'relative', width: '100%', height: '140px', backgroundColor: '#000000' }}>
+                                    <img
+                                      src={`https://img.youtube.com/vi/${youtubeId}/hqdefault.jpg`}
+                                      alt="YouTube Thumbnail"
+                                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                    />
+                                    <div style={styles.youtubePlayOverlay}>
+                                      <Play size={24} color="#ffffff" fill="#ffffff" />
+                                    </div>
+                                  </div>
+                                  <div style={{ padding: '8px 10px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                    <span style={{ fontSize: '13px', fontWeight: '700', color: '#111b21', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                      YouTube Video • Watch on YouTube
+                                    </span>
+                                    <ExternalLink size={14} color="#54656f" />
+                                  </div>
+                                </div>
+                                <div style={{ fontSize: '14px', wordBreak: 'break-word' }}>{m.content}</div>
+                              </div>
                             ) : (
-                              m.content
+                              <div style={{ fontSize: '14.2px', lineHeight: '19px', wordBreak: 'break-word' }}>{m.content}</div>
                             )}
+
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '3px', marginTop: '2px' }}>
+                              {m.edited_at && (
+                                <span style={{ fontSize: '9px', fontStyle: 'italic', color: '#667781' }}>edited</span>
+                              )}
+                              <span style={{ fontSize: '10.5px', color: '#667781' }}>{time}</span>
+                              {isMe && renderSeenReceipt(m)}
+                            </div>
                           </div>
 
-                          <button
-                            onClick={() => setSelectedMessageForDelete(m)}
-                            style={styles.msgOptionIconBtn}
-                            title="Message options"
-                          >
-                            <MoreVertical size={14} color="#94a3b8" />
-                          </button>
+                          <div style={{
+                            ...styles.quickHoverBar,
+                            opacity: isHovered ? 1 : 0,
+                            pointerEvents: isHovered ? 'auto' : 'none',
+                            transform: isHovered ? 'scale(1)' : 'scale(0.92)',
+                            transition: 'opacity 0.08s ease, transform 0.08s ease',
+                            marginInline: '6px'
+                          }}>
+                            <button 
+                              onClick={() => setActiveReactionPickerMsgId(activeReactionPickerMsgId === m.id ? null : m.id)} 
+                              style={styles.quickIconBtn} 
+                              title="React">
+                              <Smile size={14} />
+                            </button>
+
+                            <button 
+                              onClick={() => { setReplyingTo(m); setEditingMessage(null); }} 
+                              style={styles.quickIconBtn} 
+                              title="Reply">
+                              <CornerUpLeft size={14} />
+                            </button>
+
+                            {isMe && !isImage && !isViewOnceImg && !isAudio && !isPoll && (
+                              <button 
+                                onClick={() => { setEditingMessage(m); setNewMessage(m.content); setReplyingTo(null); }} 
+                                style={styles.quickIconBtn} 
+                                title="Edit message">
+                                <Edit2 size={13} />
+                              </button>
+                            )}
+
+                            <button
+                              onClick={() => setSelectedMessageForDelete(m)}
+                              style={styles.quickIconBtn}
+                              title="Delete Options"
+                            >
+                              <MoreVertical size={14} />
+                            </button>
+                          </div>
+
+                          {activeReactionPickerMsgId === m.id && (
+                            <div style={{ ...styles.whatsappReactionPopup, [isMe ? 'right' : 'left']: 0 }}>
+                              {quickEmojis.map((emoji) => (
+                                <button 
+                                  key={emoji} 
+                                  onClick={() => handleSelectReaction(m.id, emoji)}
+                                  style={styles.reactionEmojiBtn}>
+                                  {emoji}
+                                </button>
+                              ))}
+
+                              <button 
+                                onClick={() => setShowExtendedReactions(!showExtendedReactions)} 
+                                style={styles.reactionEmojiBtn} 
+                                title="More emojis">
+                                <Plus size={14} color="#64748b" />
+                              </button>
+
+                              {showExtendedReactions && (
+                                <div style={styles.extendedReactionGrid}>
+                                  {EMOJI_PALETTE.map((customEmoji) => (
+                                    <span 
+                                      key={customEmoji} 
+                                      onClick={() => handleSelectReaction(m.id, customEmoji)}
+                                      style={styles.gridEmojiSpan}>
+                                      {customEmoji}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          )}
                         </div>
 
-                        <span style={{ ...styles.messageTimestamp, alignSelf: isMe ? 'flex-end' : 'flex-start' }}>
-                          {time}
-                        </span>
+                        {msgReactions.length > 0 && (
+                          <div style={{ ...styles.reactionBadgeRow, justifyContent: isMe ? 'flex-end' : 'flex-start' }}>
+                            {Array.from(new Set(msgReactions.map((r) => r.emoji))).map((em) => {
+                              const count = msgReactions.filter((r) => r.emoji === em).length;
+                              const hasReacted = msgReactions.some((r) => r.emoji === em && r.user_id === profile.id);
+                              return (
+                                <span 
+                                  key={em} 
+                                  onClick={() => handleSelectReaction(m.id, em)}
+                                  style={{
+                                    ...styles.reactionPill,
+                                    borderColor: hasReacted ? '#00a884' : '#e9edef',
+                                    backgroundColor: hasReacted ? '#d9fdd3' : '#ffffff'
+                                  }}>
+                                  {em} {count > 1 ? count : ''}
+                                </span>
+                              );
+                            })}
+                          </div>
+                        )}
                       </div>
                     </div>
                   );
                 })}
+
+                {isCurrentChatTyping && !isAccountDeleted && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: '6px 0 2px' }}>
+                    {typingUserList[0]?.avatarUrl ? (
+                      <img
+                        src={typingUserList[0].avatarUrl}
+                        alt="Typing"
+                        style={{ width: '28px', height: '28px', borderRadius: '50%', objectFit: 'cover' }}
+                      />
+                    ) : (
+                      <div style={{ ...styles.groupAvatar, width: '28px', height: '28px', fontSize: '12px' }}>
+                        {typingUserList[0]?.username ? typingUserList[0].username[0].toUpperCase() : 'U'}
+                      </div>
+                    )}
+                    <div style={styles.typingBubble}>
+                      <span className="typing-dot" />
+                      <span className="typing-dot" style={{ margin: '0 3px' }} />
+                      <span className="typing-dot" />
+                      {activeConversation.is_group && (
+                        <span style={{ fontSize: '11px', color: '#00a884', fontWeight: '700', marginLeft: '6px' }}>
+                          {typingUserList.map((u) => u.username).join(', ')}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 <div ref={messagesEndRef} />
               </div>
 
+              {showScrollBottomBtn && (
+                <button 
+                  onClick={() => scrollToBottom('smooth')} 
+                  style={styles.floatingDownBtn}
+                  title="Scroll to latest messages">
+                  <ChevronDown size={22} color="#54656f" />
+                </button>
+              )}
+
+              {replyingTo && (
+                <div style={styles.replyBanner}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden' }}>
+                    <CornerUpLeft size={16} color="#00a884" />
+                    <span style={{ fontWeight: '700', fontSize: '13px', color: '#00a884' }}>
+                      Replying to {replyingTo.profiles?.username || 'User'}:
+                    </span>
+                    <span style={{ fontSize: '13px', color: '#667781', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {replyingTo.content.startsWith('[IMAGE]:') || replyingTo.content.startsWith('[VIEW-ONCE]:') ? '📷 Photo' : replyingTo.content.startsWith('[AUDIO]:') ? '🎤 Voice note' : replyingTo.content}
+                    </span>
+                  </div>
+                  <button onClick={() => setReplyingTo(null)} style={styles.bannerCloseBtn}><X size={15} /></button>
+                </div>
+              )}
+
+              {editingMessage && (
+                <div style={{ ...styles.replyBanner, borderLeftColor: '#f59e0b' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden' }}>
+                    <Edit2 size={16} color="#f59e0b" />
+                    <span style={{ fontWeight: '700', fontSize: '13px', color: '#f59e0b' }}>Editing message</span>
+                    <span style={{ fontSize: '13px', color: '#667781', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {editingMessage.content}
+                    </span>
+                  </div>
+                  <button onClick={() => { setEditingMessage(null); setNewMessage(''); }} style={styles.bannerCloseBtn}><X size={15} /></button>
+                </div>
+              )}
+
+              {showComposerEmojiPicker && (
+                <div style={styles.composerEmojiDrawer}>
+                  {EMOJI_PALETTE.map((emoji) => (
+                    <span 
+                      key={emoji} 
+                      onClick={() => handleComposerTyping(newMessage + emoji)}
+                      style={styles.gridEmojiSpan}>
+                      {emoji}
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              {/* Composer Input Bar */}
               <div style={styles.inputContainer}>
-                {!isDirectChatFriend ? (
+                {!isDirectChatFriend || isAccountDeleted ? (
                   <div style={styles.notFriendsGateBanner}>
                     <AlertTriangle size={18} color="#b45309" />
-                    <span>You are not friends yet. Send or wait for request acceptance to chat!</span>
+                    <span>{isAccountDeleted ? 'Account deleted' : 'unfriend'}. You can no longer chat with this user!</span>
                   </div>
                 ) : isRecording ? (
                   <div style={styles.recordingBar}>
@@ -1323,8 +2764,17 @@ export default function App() {
                       ref={fileInputRef}
                       accept="image/*"
                       style={{ display: 'none' }}
-                      onChange={handleImageMessageUpload}
+                      onChange={handleImageFileSelected}
                     />
+
+                    <button
+                      type="button"
+                      onClick={() => setShowComposerEmojiPicker(!showComposerEmojiPicker)}
+                      style={styles.composerIconBtn}
+                      title="Insert emoji"
+                    >
+                      <Smile size={22} color="#54656f" />
+                    </button>
 
                     <button
                       type="button"
@@ -1332,7 +2782,7 @@ export default function App() {
                       style={styles.composerIconBtn}
                       title="Send photo"
                     >
-                      <ImageIcon size={20} color="#64748b" />
+                      <ImageIcon size={22} color="#54656f" />
                     </button>
 
                     <button
@@ -1341,23 +2791,24 @@ export default function App() {
                       style={styles.composerIconBtn}
                       title="Hold to record voice message"
                     >
-                      <Mic size={20} color="#64748b" />
+                      <Mic size={22} color="#54656f" />
                     </button>
 
                     <input
                       type="text"
-                      placeholder="Message..."
+                      placeholder={editingMessage ? 'Edit message...' : 'Type a message'}
                       style={styles.composerInput}
                       value={newMessage}
-                      onChange={(e) => setNewMessage(e.target.value)}
+                      onChange={(e) => handleComposerTyping(e.target.value)}
                     />
 
                     <button
-                      type="submit"
+                      type="button"
+                      onClick={(e) => sendMessage(e)}
                       disabled={!newMessage.trim()}
                       style={{
                         ...styles.sendBtn,
-                        opacity: newMessage.trim() ? 1 : 0.35,
+                        opacity: newMessage.trim() ? 1 : 0.4,
                         cursor: newMessage.trim() ? 'pointer' : 'default',
                       }}
                     >
@@ -1370,36 +2821,519 @@ export default function App() {
           ) : (
             <div style={styles.emptyStateContainer}>
               <div style={styles.emptyStateIcon}>
-                <MessageSquare size={52} color="#94a3b8" />
+                <MessageSquare size={52} color="#00a884" />
               </div>
-              <h3 style={{ fontSize: '20px', fontWeight: '700', color: '#0f172a', margin: '0 0 8px' }}>Your Messages</h3>
-              <p style={{ color: '#64748b', fontSize: '15px', maxWidth: '320px', textAlign: 'center', lineHeight: '1.5' }}>
-                Select an existing chat, start a new chat with a friend, or explore new connections.
+              <h3 style={{ fontSize: '24px', fontWeight: '400', color: '#41525d', margin: '0 0 8px' }}>svpp-chat for Web</h3>
+              <p style={{ color: '#667781', fontSize: '14px', maxWidth: '360px', textAlign: 'center', lineHeight: '1.6' }}>
+                Send and receive messages in real-time. Fast, secure, and equipped with smart Generative AI.
               </p>
             </div>
           )}
         </main>
       )}
 
-      {/* Start New Chat Modal */}
+      {/* CREATE POLL MODAL */}
+      {showPollModal && (
+        <div style={styles.modalBackdrop} onClick={() => setShowPollModal(false)}>
+          <div style={styles.modalBox} onClick={(e) => e.stopPropagation()}>
+            <div style={styles.modalHead}>
+              <h4 style={{ margin: 0, fontSize: '18px', color: '#111b21' }}>Create Group Poll</h4>
+              <button onClick={() => setShowPollModal(false)} style={styles.closeBtn}><X size={20} /></button>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <input
+                type="text"
+                placeholder="Ask a question..."
+                style={styles.modernInput}
+                value={pollQuestion}
+                onChange={(e) => setPollQuestion(e.target.value)}
+              />
+              <span style={styles.fieldLabel}>Options:</span>
+              {pollOptions.map((opt, oIdx) => (
+                <input
+                  key={oIdx}
+                  type="text"
+                  placeholder={`Option ${oIdx + 1}`}
+                  style={styles.modernInput}
+                  value={opt}
+                  onChange={(e) => {
+                    const copy = [...pollOptions];
+                    copy[oIdx] = e.target.value;
+                    setPollOptions(copy);
+                  }}
+                />
+              ))}
+              {pollOptions.length < 5 && (
+                <button
+                  type="button"
+                  onClick={() => setPollOptions([...pollOptions, ''])}
+                  style={styles.secondaryBtn}
+                >
+                  <Plus size={14} style={{ marginRight: '4px' }} /> Add Option
+                </button>
+              )}
+              <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
+                <button onClick={() => setShowPollModal(false)} style={styles.secondaryBtn}>Cancel</button>
+                <button onClick={createPollMessage} style={styles.primaryButton}>Send Poll</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ARCHIVE PIN MODAL */}
+      {showArchiveModal && (
+        <div style={styles.modalBackdrop} onClick={() => setShowArchiveModal(false)}>
+          <div style={styles.modalBox} onClick={(e) => e.stopPropagation()}>
+            <div style={styles.modalHead}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Archive size={20} color="#00a884" />
+                <h4 style={{ margin: 0, fontSize: '18px' }}>Archived Chats</h4>
+              </div>
+              <button onClick={() => setShowArchiveModal(false)} style={styles.closeBtn}><X size={20} /></button>
+            </div>
+
+            {!isArchiveUnlocked ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', padding: '10px 0' }}>
+                <p style={{ fontSize: '13.5px', color: '#667781', margin: 0 }}>
+                  Enter your Archive PIN to unlock archived conversations (Default PIN: 1234):
+                </p>
+                <input
+                  type="password"
+                  placeholder="Enter Archive PIN"
+                  maxLength={6}
+                  style={styles.modernInput}
+                  value={enteredArchivePin}
+                  onChange={(e) => setEnteredArchivePin(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') verifyArchivePin(); }}
+                />
+                <button onClick={verifyArchivePin} style={styles.primaryButton}>Unlock Archive</button>
+              </div>
+            ) : (
+              <div>
+                <p style={{ fontSize: '13px', color: '#667781', margin: '0 0 12px' }}>
+                  Select any chat to open or unarchive:
+                </p>
+                <div style={styles.modalScrollList}>
+                  {archivedConversations.map((c) => {
+                    const otherMember = c.conversation_members?.find((m) => m.user_id !== profile?.id)?.profiles;
+                    const title = c.is_group ? c.name : otherMember?.username || 'Account deleted';
+                    return (
+                      <div key={c.id} style={styles.modalFriendRow}>
+                        {renderAvatar(c.is_group ? c.avatar_url : otherMember?.avatar_url, title, 38, false, false)}
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontWeight: '700', fontSize: '14px', color: '#111b21', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {title}
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', gap: '6px' }}>
+                          <button
+                            onClick={() => {
+                              handleSelectConversation(c);
+                              setShowArchiveModal(false);
+                            }}
+                            style={styles.openChatBtn}
+                          >
+                            Open
+                          </button>
+                          <button
+                            onClick={(e) => toggleArchiveChat(c.id, e)}
+                            style={styles.removeFriendBtn}
+                            title="Unarchive"
+                          >
+                            <Archive size={14} /> Unarchive
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* VIEW ONCE CONFIRMATION MODAL */}
+      {pendingImageUpload && (
+        <div style={styles.lightboxBackdrop} onClick={() => setPendingImageUpload(null)}>
+          <div style={styles.viewOnceModalBox} onClick={(e) => e.stopPropagation()}>
+            <div style={styles.modalHead}>
+              <h4 style={{ margin: 0, fontSize: '17px', color: '#111b21' }}>Send Photo</h4>
+              <button onClick={() => setPendingImageUpload(null)} style={styles.closeBtn}><X size={18} /></button>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'center', margin: '10px 0' }}>
+              <img src={pendingImageUpload.src} alt="Preview" style={styles.viewOncePreviewImg} />
+            </div>
+            <label style={styles.viewOnceCheckboxRow}>
+              <input
+                type="checkbox"
+                checked={isViewOnceChecked}
+                onChange={(e) => setIsViewOnceChecked(e.target.checked)}
+                style={{ width: '18px', height: '18px', accentColor: '#00a884', cursor: 'pointer' }}
+              />
+              <span style={{ fontSize: '14px', fontWeight: '600', color: '#111b21' }}>
+                View Once Mode ({activeConversation?.is_group ? 'All members can view 1 time each' : 'Recipient can view 1 time'})
+              </span>
+            </label>
+            <div style={{ display: 'flex', gap: '8px', marginTop: '16px' }}>
+              <button onClick={() => setPendingImageUpload(null)} style={styles.secondaryBtn}>Cancel</button>
+              <button onClick={confirmSendImageMessage} style={styles.primaryButton}>Send Photo</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* OPEN VIEW ONCE LIGHTBOX */}
+      {viewOnceViewerData && (
+        <div style={styles.lightboxBackdrop} onClick={() => setViewOnceViewerData(null)}>
+          <div style={styles.lightboxContainer} onClick={(e) => e.stopPropagation()}>
+            <div style={styles.lightboxHeader}>
+              <span style={{ color: '#fff', fontWeight: '600', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <Flame size={16} color="#ef4444" /> View-Once Photo (Expires after viewing)
+              </span>
+              <button onClick={() => setViewOnceViewerData(null)} style={styles.lightboxCloseBtn}>
+                <X size={22} color="#fff" />
+              </button>
+            </div>
+            <img 
+              src={viewOnceViewerData.content.replace('[VIEW-ONCE]:', '')} 
+              alt="View Once" 
+              style={styles.lightboxImage} 
+            />
+          </div>
+        </div>
+      )}
+
+      {/* MOBILE CONTEXT MENU POPUP */}
+      {mobileContextMenuMsg && (
+        <div style={styles.modalBackdrop} onClick={() => setMobileContextMenuMsg(null)}>
+          <div style={{ ...styles.modalBox, maxWidth: '300px' }} onClick={(e) => e.stopPropagation()}>
+            <div style={styles.modalHead}>
+              <h4 style={{ margin: 0, fontSize: '16px', color: '#111b21' }}>Message Actions</h4>
+              <button onClick={() => setMobileContextMenuMsg(null)} style={styles.closeBtn}><X size={18} /></button>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '10px' }}>
+              <button
+                onClick={() => {
+                  setReplyingTo(mobileContextMenuMsg);
+                  setEditingMessage(null);
+                  setMobileContextMenuMsg(null);
+                }}
+                style={styles.deleteChoiceBtn}
+              >
+                Reply
+              </button>
+
+              {mobileContextMenuMsg.sender_id === profile.id && !mobileContextMenuMsg.content.startsWith('[IMAGE]:') && !mobileContextMenuMsg.content.startsWith('[VIEW-ONCE]:') && !mobileContextMenuMsg.content.startsWith('[AUDIO]:') && !mobileContextMenuMsg.content.startsWith('[POLL]:') && (
+                <button
+                  onClick={() => {
+                    setEditingMessage(mobileContextMenuMsg);
+                    setNewMessage(mobileContextMenuMsg.content);
+                    setReplyingTo(null);
+                    setMobileContextMenuMsg(null);
+                  }}
+                  style={styles.deleteChoiceBtn}
+                >
+                  Edit Message
+                </button>
+              )}
+
+              {mobileContextMenuMsg.sender_id === profile.id && (
+                <button
+                  onClick={() => handleDeleteForEveryone(mobileContextMenuMsg)}
+                  style={{ ...styles.deleteChoiceBtn, color: '#dc2626', backgroundColor: '#fef2f2', border: '1px solid #fecaca', fontWeight: '700' }}
+                >
+                  Delete for Everyone
+                </button>
+              )}
+
+              <button
+                onClick={() => handleDeleteForMe(mobileContextMenuMsg)}
+                style={styles.deleteChoiceBtn}
+              >
+                Delete for Me
+              </button>
+
+              <button
+                onClick={() => setMobileContextMenuMsg(null)}
+                style={styles.secondaryBtn}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* META AI ASSISTANT MODAL */}
+      {showAiModal && (
+        <div style={styles.lightboxBackdrop} onClick={() => setShowAiModal(false)}>
+          <div style={styles.aiAssistantModalBox} onClick={(e) => e.stopPropagation()}>
+            <div style={styles.aiModalHeader}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div className="meta-ai-ring" style={{ width: '36px', height: '36px', borderRadius: '50%', padding: '2px' }}>
+                  <div style={{ width: '100%', height: '100%', borderRadius: '50%', backgroundColor: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <Sparkles size={16} color="#00a884" />
+                  </div>
+                </div>
+                <div>
+                  <div style={{ fontWeight: '800', fontSize: '15px', color: '#111b21' }}>Meta AI Assistant</div>
+                  <div style={{ fontSize: '11px', color: '#00a884' }}>Online • AI Assistant</div>
+                </div>
+              </div>
+              <button onClick={() => setShowAiModal(false)} style={styles.closeBtn}>
+                <X size={20} />
+              </button>
+            </div>
+
+            <div style={styles.aiMessageThread}>
+              {aiMessages.map((msg) => (
+                <div 
+                  key={msg.id} 
+                  style={{ 
+                    display: 'flex', 
+                    justifyContent: msg.sender === 'user' ? 'flex-end' : 'flex-start',
+                    margin: '6px 0' 
+                  }}
+                >
+                  <div style={{
+                    ...styles.aiBubble,
+                    backgroundColor: msg.sender === 'user' ? '#d9fdd3' : '#f0f2f5',
+                    color: '#111b21',
+                    whiteSpace: 'pre-wrap'
+                  }}>
+                    {msg.text}
+                  </div>
+                </div>
+              ))}
+              {isAiResponding && (
+                <div style={{ display: 'flex', justifyContent: 'flex-start', margin: '6px 0' }}>
+                  <div style={{ ...styles.aiBubble, backgroundColor: '#f0f2f5', display: 'flex', gap: '4px', alignItems: 'center' }}>
+                    <span className="typing-dot" />
+                    <span className="typing-dot" style={{ margin: '0 2px' }} />
+                    <span className="typing-dot" />
+                  </div>
+                </div>
+              )}
+              <div ref={aiChatEndRef} />
+            </div>
+
+            <div style={styles.aiComposerBar}>
+              <input
+                type="text"
+                placeholder="Ask anything or ask about svpp-chat..."
+                value={aiInput}
+                onChange={(e) => setAiInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleSendAiMessage(); }}
+                style={styles.aiInput}
+              />
+              <button onClick={handleSendAiMessage} disabled={isAiResponding} style={styles.aiSendBtn}>
+                <Send size={16} color="#ffffff" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {profilePreviewTarget && (
+        <div style={styles.lightboxBackdrop} onClick={() => setProfilePreviewTarget(null)}>
+          <div style={styles.profilePopoverBox} onClick={(e) => e.stopPropagation()}>
+            <div style={styles.profilePopoverHead}>
+              <span style={{ fontWeight: '700', fontSize: '16px', color: '#111b21' }}>
+                {profilePreviewTarget.username}
+              </span>
+              <button onClick={() => setProfilePreviewTarget(null)} style={styles.closeBtn}>
+                <X size={18} />
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'center', padding: '16px 0' }}>
+              {profilePreviewTarget.avatarUrl ? (
+                <img
+                  src={profilePreviewTarget.avatarUrl}
+                  alt="Profile"
+                  onClick={() => {
+                    setPreviewImage({ src: profilePreviewTarget.avatarUrl, title: profilePreviewTarget.username });
+                    setProfilePreviewTarget(null);
+                  }}
+                  style={styles.profilePopoverImg}
+                  title="Click to see full screen"
+                />
+              ) : (
+                <div style={styles.profilePopoverPlaceholder}>
+                  {profilePreviewTarget.username ? profilePreviewTarget.username[0].toUpperCase() : 'U'}
+                </div>
+              )}
+            </div>
+
+            <div style={styles.profilePopoverActions}>
+              {profilePreviewTarget.userProfile && profilePreviewTarget.userProfile.id !== profile.id && (
+                <button
+                  onClick={() => {
+                    handleStartDirectChat(profilePreviewTarget.userProfile);
+                  }}
+                  style={styles.primaryButton}
+                >
+                  <MessageSquare size={16} style={{ marginRight: '6px' }} /> Message
+                </button>
+              )}
+              {profilePreviewTarget.isGroup && (
+                <button
+                  onClick={() => {
+                    handleSelectConversation(profilePreviewTarget.conv);
+                    setShowGroupInfoModal(true);
+                    setProfilePreviewTarget(null);
+                  }}
+                  style={styles.primaryButton}
+                >
+                  <Users size={16} style={{ marginRight: '6px' }} /> View Group Info
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {previewImage && (
+        <div style={styles.lightboxBackdrop} onClick={() => setPreviewImage(null)}>
+          <div style={styles.lightboxContainer} onClick={(e) => e.stopPropagation()}>
+            <div style={styles.lightboxHeader}>
+              <span style={{ color: '#fff', fontWeight: '600', fontSize: '14px' }}>
+                {previewImage.title || 'Photo'}
+              </span>
+              <button onClick={() => setPreviewImage(null)} style={styles.lightboxCloseBtn}>
+                <X size={22} color="#fff" />
+              </button>
+            </div>
+            <img src={previewImage.src} alt="Enlarged" style={styles.lightboxImage} />
+          </div>
+        </div>
+      )}
+
+      {showGroupInfoModal && activeConversation?.is_group && (
+        <div style={styles.modalBackdrop}>
+          <div style={styles.modalBox}>
+            <div style={styles.modalHead}>
+              <h4 style={{ margin: 0, fontSize: '18px' }}>Group Info</h4>
+              <button onClick={() => setShowGroupInfoModal(false)} style={styles.closeBtn}><X size={20} /></button>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px', padding: '10px 0 16px', borderBottom: '1px solid #f1f5f9' }}>
+              <input
+                type="file"
+                ref={groupAvatarInputRef}
+                accept="image/*"
+                style={{ display: 'none' }}
+                onChange={handleGroupAvatarUpload}
+              />
+              <div style={{ position: 'relative' }}>
+                {activeConversation.avatar_url ? (
+                  renderAvatar(activeConversation.avatar_url, activeConversation.name, 72, false, false, { isGroup: true, conv: activeConversation })
+                ) : (
+                  <div style={{ ...styles.groupAvatar, width: '72px', height: '72px', fontSize: '32px' }}>👥</div>
+                )}
+                <button
+                  type="button"
+                  onClick={() => groupAvatarInputRef.current?.click()}
+                  style={styles.avatarCameraBadge}
+                  title="Change group profile photo"
+                >
+                  <Camera size={15} color="#ffffff" />
+                </button>
+              </div>
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ fontWeight: '800', fontSize: '17px', color: '#111b21' }}>{activeConversation.name}</div>
+                <div style={{ fontSize: '12px', color: '#667781' }}>{activeConvMembers.length} group members</div>
+              </div>
+            </div>
+
+            <div style={{ marginTop: '12px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                <span style={styles.sectionHeading}>Members</span>
+                <button 
+                  onClick={() => {
+                    setShowGroupInfoModal(false);
+                    setShowAddMemberModal(true);
+                  }}
+                  style={styles.addMemberLinkBtn}
+                >
+                  <Plus size={14} /> Add Members
+                </button>
+              </div>
+
+              <div style={styles.modalScrollList}>
+                {activeConvMembers.map((m) => {
+                  const isOwner = activeConversation.created_by === m.user_id;
+                  const isOnline = onlineUserIds.has(m.user_id);
+                  const isSelf = m.user_id === profile.id;
+                  const amIGroupOwner = activeConversation.created_by === profile.id;
+
+                  return (
+                    <div key={m.user_id} style={styles.modalFriendRow}>
+                      {renderAvatar(m.profiles?.avatar_url, m.profiles?.username || 'M', 38, false, isOnline, { userProfile: m.profiles })}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: '700', fontSize: '14px', color: '#111b21', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <span>{m.profiles?.username || 'Member'}</span>
+                          {isSelf && <span style={{ fontSize: '11px', color: '#667781' }}>(You)</span>}
+                        </div>
+                        <div style={{ fontSize: '12px', color: isOnline ? '#00a884' : '#8696a0' }}>
+                          {isOnline ? '● Online' : '○ Not online'}
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        {isOwner && (
+                          <div style={styles.groupOwnerBadge} title="Group Creator & Admin">
+                            <Crown size={12} color="#b45309" />
+                            <span>Owner</span>
+                          </div>
+                        )}
+
+                        {amIGroupOwner && !isSelf && (
+                          <button
+                            onClick={() => handleRemoveMember(m.user_id, m.profiles?.username)}
+                            style={styles.removeMemberBtn}
+                            title="Remove member from group"
+                          >
+                            <UserMinus size={14} /> Remove
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div style={{ marginTop: '16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <button onClick={handleLeaveGroup} style={styles.leaveGroupBtn}>
+                <LogOut size={16} /> Leave Group
+              </button>
+              <button onClick={() => setShowGroupInfoModal(false)} style={styles.secondaryBtn}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showNewChatModal && (
         <div style={styles.modalBackdrop}>
           <div style={styles.modalBox}>
             <div style={styles.modalHead}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <MessageCircle size={20} color="#2563eb" />
+                <MessageCircle size={20} color="#00a884" />
                 <h4 style={{ margin: 0, fontSize: '18px' }}>Start a New Chat</h4>
               </div>
               <button onClick={() => setShowNewChatModal(false)} style={styles.closeBtn}><X size={20} /></button>
             </div>
 
-            <p style={{ fontSize: '13px', color: '#64748b', margin: '0 0 12px' }}>
+            <p style={{ fontSize: '13px', color: '#667781', margin: '0 0 12px' }}>
               Select an accepted friend to open a conversation:
             </p>
 
             <div style={styles.modalScrollList}>
               {confirmedFriends.length === 0 ? (
-                <div style={{ padding: '20px', textAlign: 'center', color: '#94a3b8', fontSize: '14px' }}>
+                <div style={{ padding: '20px', textAlign: 'center', color: '#8696a0', fontSize: '14px' }}>
                   No accepted friends yet. Head to Explore to add friends first!
                 </div>
               ) : (
@@ -1409,10 +3343,10 @@ export default function App() {
                     onClick={() => handleStartDirectChat(f)}
                     style={styles.modalFriendRow}
                   >
-                    {renderAvatar(f.avatar_url, f.username || f.email, 38, false, onlineUserIds.has(f.id))}
+                    {renderAvatar(f.avatar_url, f.username || f.email, 38, false, onlineUserIds.has(f.id), { userProfile: f })}
                     <div style={{ flex: 1 }}>
-                      <div style={{ fontWeight: '700', fontSize: '14px', color: '#0f172a' }}>{f.username || 'User'}</div>
-                      <div style={{ fontSize: '12px', color: '#64748b' }}>{onlineUserIds.has(f.id) ? '● Online' : '○ Not online'}</div>
+                      <div style={{ fontWeight: '700', fontSize: '14px', color: '#111b21' }}>{f.username || 'User'}</div>
+                      <div style={{ fontSize: '12px', color: '#667781' }}>{onlineUserIds.has(f.id) ? '● Online' : '○ Not online'}</div>
                     </div>
                     <button style={styles.openChatBtn}>Chat</button>
                   </div>
@@ -1427,35 +3361,77 @@ export default function App() {
         </div>
       )}
 
-      {/* Message Deletion Modal */}
+      {showAddMemberModal && activeConversation?.is_group && (
+        <div style={styles.modalBackdrop}>
+          <div style={styles.modalBox}>
+            <div style={styles.modalHead}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <UserPlus size={20} color="#00a884" />
+                <h4 style={{ margin: 0, fontSize: '18px' }}>Add People to Group</h4>
+              </div>
+              <button onClick={() => setShowAddMemberModal(false)} style={styles.closeBtn}><X size={20} /></button>
+            </div>
+
+            <p style={{ fontSize: '13px', color: '#667781', margin: '0 0 12px' }}>
+              Select friends to add to <b>{activeConversation.name}</b>:
+            </p>
+
+            <div style={styles.modalScrollList}>
+              {friendsNotInActiveGroup.length === 0 ? (
+                <div style={{ padding: '20px', textAlign: 'center', color: '#8696a0', fontSize: '14px' }}>
+                  All of your friends are already in this group!
+                </div>
+              ) : (
+                friendsNotInActiveGroup.map((friend) => (
+                  <div key={friend.id} style={styles.modalFriendRow}>
+                    {renderAvatar(friend.avatar_url, friend.username || friend.email, 38, false, onlineUserIds.has(friend.id), { userProfile: friend })}
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: '700', fontSize: '14px', color: '#111b21' }}>{friend.username || 'User'}</div>
+                      <div style={{ fontSize: '12px', color: '#667781' }}>{onlineUserIds.has(friend.id) ? '● Online' : '○ Not online'}</div>
+                    </div>
+                    <button onClick={() => handleAddMemberToExistingGroup(friend.id)} style={styles.openChatBtn}>
+                      Add
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div style={styles.modalActions}>
+              <button onClick={() => setShowAddMemberModal(false)} style={styles.secondaryBtn}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {selectedMessageForDelete && (
         <div style={styles.modalBackdrop}>
           <div style={{ ...styles.modalBox, maxWidth: '340px' }}>
             <div style={styles.modalHead}>
-              <h4 style={{ margin: 0, fontSize: '16px' }}>Delete Message</h4>
+              <h4 style={{ margin: 0, fontSize: '16px' }}>Delete Message?</h4>
               <button onClick={() => setSelectedMessageForDelete(null)} style={styles.closeBtn}>
                 <X size={18} />
               </button>
             </div>
-            <p style={{ fontSize: '13px', color: '#64748b', margin: '0 0 14px' }}>
+            <p style={{ fontSize: '13px', color: '#667781', margin: '0 0 14px' }}>
               Choose how you want to delete this message:
             </p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {selectedMessageForDelete.sender_id === profile.id && (
+                <button
+                  onClick={() => handleDeleteForEveryone(selectedMessageForDelete)}
+                  style={{ ...styles.deleteChoiceBtn, color: '#dc2626', backgroundColor: '#fef2f2', border: '1px solid #fecaca', fontWeight: '700' }}
+                >
+                  <Trash2 size={15} style={{ marginRight: '6px' }} /> Delete for Everyone
+                </button>
+              )}
+
               <button
                 onClick={() => handleDeleteForMe(selectedMessageForDelete)}
                 style={styles.deleteChoiceBtn}
               >
                 Delete for Me
               </button>
-              
-              {selectedMessageForDelete.sender_id === profile.id && (
-                <button
-                  onClick={() => handleDeleteForEveryone(selectedMessageForDelete)}
-                  style={{ ...styles.deleteChoiceBtn, color: '#dc2626', backgroundColor: '#fef2f2', border: '1px solid #fecaca' }}
-                >
-                  Delete for Everyone
-                </button>
-              )}
 
               <button
                 onClick={() => setSelectedMessageForDelete(null)}
@@ -1468,7 +3444,6 @@ export default function App() {
         </div>
       )}
 
-      {/* Group Creation Modal */}
       {showGroupModal && (
         <div style={styles.modalBackdrop}>
           <div style={styles.modalBox}>
@@ -1507,7 +3482,6 @@ export default function App() {
         </div>
       )}
 
-      {/* Settings Modal */}
       {showSettingsModal && (
         <div style={styles.modalBackdrop}>
           <div style={styles.modalBox}>
@@ -1530,13 +3504,7 @@ export default function App() {
                 onClick={() => setSettingsTab('profile')}
                 style={settingsTab === 'profile' ? styles.settingsTabActive : styles.settingsTab}
               >
-                Profile Photo
-              </button>
-              <button
-                onClick={() => setSettingsTab('wallpaper')}
-                style={settingsTab === 'wallpaper' ? styles.settingsTabActive : styles.settingsTab}
-              >
-                Wallpaper
+                Profile
               </button>
               <button
                 onClick={() => setSettingsTab('credentials')}
@@ -1545,10 +3513,16 @@ export default function App() {
                 Credentials
               </button>
               <button
+                onClick={() => setSettingsTab('wallpaper')}
+                style={settingsTab === 'wallpaper' ? styles.settingsTabActive : styles.settingsTab}
+              >
+                Wallpaper
+              </button>
+              <button
                 onClick={() => setSettingsTab('danger')}
                 style={settingsTab === 'danger' ? styles.settingsTabActive : styles.settingsTab}
               >
-                Delete Account
+                Delete
               </button>
             </div>
 
@@ -1574,7 +3548,7 @@ export default function App() {
                   onChange={handleProfilePhotoUpload}
                 />
                 <div style={{ position: 'relative' }}>
-                  {renderAvatar(profile?.avatar_url, profile?.username || session.user.email, 80)}
+                  {renderAvatar(profile?.avatar_url, profile?.username || session.user.email, 80, false, false, { isSelf: true })}
                   <button
                     type="button"
                     onClick={() => avatarInputRef.current?.click()}
@@ -1584,7 +3558,7 @@ export default function App() {
                     <Camera size={16} color="#ffffff" />
                   </button>
                 </div>
-                <p style={{ fontSize: '13px', color: '#64748b', textAlign: 'center', margin: 0 }}>
+                <p style={{ fontSize: '13px', color: '#667781', textAlign: 'center', margin: 0 }}>
                   Upload a custom photo for your account avatar.
                 </p>
                 <button
@@ -1599,86 +3573,69 @@ export default function App() {
               </div>
             )}
 
-            {settingsTab === 'wallpaper' && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-                <span style={styles.fieldLabel}>Preset Colors:</span>
-                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                  {[
-                    { name: 'Plain White', color: '#ffffff' },
-                    { name: 'Soft Gray', color: '#f1f5f9' },
-                    { name: 'Warm Cream', color: '#fef3c7' },
-                    { name: 'Pale Rose', color: '#ffe4e6' },
-                    { name: 'Lavender', color: '#ede9fe' },
-                    { name: 'Midnight', color: '#0f172a' },
-                  ].map((p) => (
-                    <button
-                      key={p.color}
-                      type="button"
-                      onClick={() => handleSetBgColor(p.color)}
-                      style={{
-                        ...styles.colorPresetBtn,
-                        backgroundColor: p.color,
-                        outline: chatBg.type === 'color' && chatBg.value === p.color ? '2px solid #2563eb' : '1px solid #cbd5e1',
-                      }}
-                      title={p.name}
-                    />
-                  ))}
-                </div>
-
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <span style={styles.fieldLabel}>Custom Color:</span>
-                  <input
-                    type="color"
-                    value={chatBg.type === 'color' ? chatBg.value : '#ffffff'}
-                    onChange={(e) => handleSetBgColor(e.target.value)}
-                    style={{ border: 'none', width: '36px', height: '36px', cursor: 'pointer', borderRadius: '6px' }}
-                  />
-                </div>
-
-                <input
-                  type="file"
-                  ref={bgImageInputRef}
-                  accept="image/*"
-                  style={{ display: 'none' }}
-                  onChange={handleBgImageUpload}
-                />
-                <button
-                  type="button"
-                  onClick={() => bgImageInputRef.current?.click()}
-                  style={styles.secondaryBtn}
-                >
-                  <Palette size={16} style={{ marginRight: '6px' }} />
-                  Upload Photo as Chat Wallpaper
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleResetWallpaper}
-                  style={styles.resetBtn}
-                >
-                  <RotateCcw size={14} style={{ marginRight: '6px' }} />
-                  Reset to Default Plain White
-                </button>
-              </div>
-            )}
-
             {settingsTab === 'credentials' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                <span style={styles.fieldLabel}>Select what to update:</span>
+                <div style={styles.credentialsViewerCard}>
+                  <div style={{ fontWeight: '800', fontSize: '13.5px', color: '#111b21', marginBottom: '8px' }}>
+                    Your Login Details & Archive PIN
+                  </div>
+                  <div style={styles.credentialRow}>
+                    <span style={{ color: '#667781', fontSize: '12px' }}>Username:</span>
+                    <span style={{ fontWeight: '700', color: '#111b21', fontSize: '13px' }}>{profile?.username || 'User'}</span>
+                  </div>
+                  <div style={styles.credentialRow}>
+                    <span style={{ color: '#667781', fontSize: '12px' }}>Email:</span>
+                    <span style={{ fontWeight: '600', color: '#111b21', fontSize: '12.5px' }}>{session.user.email}</span>
+                  </div>
+                  <div style={styles.credentialRow}>
+                    <span style={{ color: '#667781', fontSize: '12px' }}>Password:</span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span style={{ fontWeight: '700', color: '#111b21', fontSize: '13px' }}>
+                        {currentSessionPassword ? (showSavedPassword ? currentSessionPassword : '••••••••••••') : '••••••••'}
+                      </span>
+                      {currentSessionPassword && (
+                        <button 
+                          type="button" 
+                          onClick={() => setShowSavedPassword(!showSavedPassword)}
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px' }}
+                        >
+                          {showSavedPassword ? <EyeOff size={14} color="#00a884" /> : <Eye size={14} color="#00a884" />}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  <div style={styles.credentialRow}>
+                    <span style={{ color: '#667781', fontSize: '12px' }}>Archive PIN:</span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span style={{ fontWeight: '700', color: '#111b21', fontSize: '13px' }}>
+                        {showArchivePin ? archivePin : '••••'}
+                      </span>
+                      <button 
+                        type="button" 
+                        onClick={() => setShowArchivePin(!showArchivePin)}
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px' }}
+                      >
+                        {showArchivePin ? <EyeOff size={14} color="#00a884" /> : <Eye size={14} color="#00a884" />}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <span style={styles.fieldLabel}>Update Username & Password:</span>
                 <div style={styles.optionSelectorGroup}>
                   <button
                     type="button"
                     onClick={() => setChangeOption('username')}
                     style={changeOption === 'username' ? styles.optionSelectedBtn : styles.optionBtn}
                   >
-                    Only Username
+                    Username
                   </button>
                   <button
                     type="button"
                     onClick={() => setChangeOption('password')}
                     style={changeOption === 'password' ? styles.optionSelectedBtn : styles.optionBtn}
                   >
-                    Only Password
+                    Password
                   </button>
                   <button
                     type="button"
@@ -1715,13 +3672,6 @@ export default function App() {
                   </div>
                 )}
 
-                <div style={styles.emailBackupNotice}>
-                  <MailCheck size={16} color="#2563eb" style={{ flexShrink: 0, marginTop: '2px' }} />
-                  <span>
-                    New details will be mailed directly to <b>{session.user.email}</b>.
-                  </span>
-                </div>
-
                 <button
                   type="button"
                   onClick={handleUpdateCredentials}
@@ -1729,6 +3679,97 @@ export default function App() {
                   style={styles.primaryButton}
                 >
                   {savingSettings ? 'Updating...' : 'Save & Email New Credentials'}
+                </button>
+
+                <div style={{ borderTop: '1px solid #e9edef', paddingTop: '10px', marginTop: '4px' }}>
+                  <label style={styles.fieldLabel}>Change Archive PIN Separately</label>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <input
+                      type="text"
+                      placeholder="New Archive PIN"
+                      maxLength={6}
+                      style={styles.modernInput}
+                      value={newArchivePinInput}
+                      onChange={(e) => setNewArchivePinInput(e.target.value)}
+                    />
+                    <button
+                      type="button"
+                      onClick={handleSaveArchivePinOnly}
+                      style={{ ...styles.primaryButton, width: '140px', flexShrink: 0 }}
+                    >
+                      Save PIN
+                    </button>
+                  </div>
+                </div>
+
+                <div style={styles.emailBackupNotice}>
+                  <MailCheck size={16} color="#00a884" style={{ flexShrink: 0, marginTop: '2px' }} />
+                  <span>
+                    Credentials updates are mailed directly to <b>{session.user.email}</b>.
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {settingsTab === 'wallpaper' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                <span style={styles.fieldLabel}>Preset Colors:</span>
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                  {[
+                    { name: 'WhatsApp Classic', color: '#efeae2' },
+                    { name: 'Pure White', color: '#ffffff' },
+                    { name: 'Soft Gray', color: '#f0f2f5' },
+                    { name: 'Warm Cream', color: '#fef3c7' },
+                    { name: 'Pale Rose', color: '#ffe4e6' },
+                    { name: 'Dark Slate', color: '#0f172a' },
+                  ].map((p) => (
+                    <button
+                      key={p.color}
+                      type="button"
+                      onClick={() => handleSetBgColor(p.color)}
+                      style={{
+                        ...styles.colorPresetBtn,
+                        backgroundColor: p.color,
+                        outline: chatBg.type === 'color' && chatBg.value === p.color ? '2px solid #00a884' : '1px solid #cbd5e1',
+                      }}
+                      title={p.name}
+                    />
+                  ))}
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <span style={styles.fieldLabel}>Custom Color:</span>
+                  <input
+                    type="color"
+                    value={chatBg.type === 'color' ? chatBg.value : '#efeae2'}
+                    onChange={(e) => handleSetBgColor(e.target.value)}
+                    style={{ border: 'none', width: '36px', height: '36px', cursor: 'pointer', borderRadius: '6px' }}
+                  />
+                </div>
+
+                <input
+                  type="file"
+                  ref={bgImageInputRef}
+                  accept="image/*"
+                  style={{ display: 'none' }}
+                  onChange={handleBgImageUpload}
+                />
+                <button
+                  type="button"
+                  onClick={() => bgImageInputRef.current?.click()}
+                  style={styles.secondaryBtn}
+                >
+                  <Palette size={16} style={{ marginRight: '6px' }} />
+                  Upload Photo as Chat Wallpaper
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleResetWallpaper}
+                  style={styles.resetBtn}
+                >
+                  <RotateCcw size={14} style={{ marginRight: '6px' }} />
+                  Reset to WhatsApp Default
                 </button>
               </div>
             )}
@@ -1741,7 +3782,7 @@ export default function App() {
                     Permanently Delete Account
                   </span>
                 </div>
-                <p style={{ fontSize: '13px', color: '#64748b', margin: '0 0 12px', lineHeight: '1.4' }}>
+                <p style={{ fontSize: '13px', color: '#667781', margin: '0 0 12px', lineHeight: '1.4' }}>
                   Wipes your profile, messages, and chats completely. An email code is required to confirm. After deletion, this email can be used to register again anytime.
                 </p>
 
@@ -1794,123 +3835,202 @@ export default function App() {
 }
 
 const styles = {
-  loadingContainer: { display: 'flex', height: '100vh', alignItems: 'center', justifyContent: 'center', backgroundColor: '#ffffff' },
-  appContainer: { display: 'flex', height: '100vh', width: '100vw', backgroundColor: '#ffffff', color: '#0f172a', overflow: 'hidden' },
+  loadingContainer: { display: 'flex', height: '100dvh', width: '100vw', alignItems: 'center', justifyContent: 'center', backgroundColor: '#ffffff' },
+  appContainer: { display: 'flex', height: '100dvh', width: '100vw', backgroundColor: '#ffffff', color: '#111b21', overflow: 'hidden', position: 'relative' },
 
-  authContainer: { display: 'flex', height: '100vh', width: '100vw', alignItems: 'center', justifyContent: 'center', backgroundColor: '#f8fafc', padding: '16px' },
-  authCard: { width: '100%', maxWidth: '420px', padding: '40px', borderRadius: '20px', backgroundColor: '#ffffff', border: '1px solid #e2e8f0', boxShadow: '0 10px 30px rgba(0,0,0,0.06)' },
+  authContainer: { display: 'flex', height: '100dvh', width: '100vw', alignItems: 'center', justifyContent: 'center', backgroundColor: '#f0f2f5', padding: '16px' },
+  authCard: { width: '100%', maxWidth: '420px', padding: '40px', borderRadius: '20px', backgroundColor: '#ffffff', border: '1px solid #e9edef', boxShadow: '0 10px 30px rgba(0,0,0,0.06)' },
   authHeader: { textAlign: 'center', marginBottom: '28px' },
-  logoBadge: { width: '52px', height: '52px', borderRadius: '16px', background: 'linear-gradient(135deg, #2563eb, #3b82f6)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px', boxShadow: '0 8px 16px rgba(37,99,235,0.25)' },
-  authTitle: { fontSize: '24px', fontWeight: '800', margin: '0 0 6px', color: '#0f172a' },
-  authSubtitle: { fontSize: '14px', color: '#64748b', margin: 0, lineHeight: '1.4' },
+  logoBadge: { width: '52px', height: '52px', borderRadius: '16px', background: 'linear-gradient(135deg, #00a884, #128c7e)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px', boxShadow: '0 8px 16px rgba(0,168,132,0.25)' },
+  authTitle: { fontSize: '24px', fontWeight: '800', margin: '0 0 6px', color: '#111b21' },
+  authSubtitle: { fontSize: '14px', color: '#667781', margin: 0, lineHeight: '1.4' },
   authForm: { display: 'flex', flexDirection: 'column', gap: '14px' },
   errorBanner: { padding: '12px 16px', borderRadius: '10px', backgroundColor: '#fef2f2', color: '#dc2626', fontSize: '14px', marginBottom: '14px', border: '1px solid #fee2e2' },
-  modernInput: { width: '100%', boxSizing: 'border-box', padding: '12px 14px', borderRadius: '10px', backgroundColor: '#f8fafc', border: '1px solid #cbd5e1', color: '#0f172a', fontSize: '15px', outline: 'none' },
-  primaryButton: { width: '100%', padding: '12px', borderRadius: '10px', background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)', color: '#ffffff', border: 'none', fontWeight: '700', fontSize: '15px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' },
-  googleButton: { width: '100%', padding: '12px', borderRadius: '10px', backgroundColor: '#ffffff', color: '#0f172a', border: '1px solid #cbd5e1', fontWeight: '600', fontSize: '15px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px', marginTop: '6px' },
-  divider: { display: 'flex', alignItems: 'center', margin: '18px 0' },
-  dividerLine: { flex: 1, height: '1px', backgroundColor: '#e2e8f0' },
-  dividerText: { margin: '0 12px', color: '#94a3b8', fontSize: '14px' },
-  switchAuthText: { textAlign: 'center', fontSize: '14px', color: '#64748b', marginTop: '20px' },
-  switchAuthLink: { color: '#2563eb', fontWeight: '700', cursor: 'pointer' },
+  modernInput: { width: '100%', boxSizing: 'border-box', padding: '12px 14px', borderRadius: '10px', backgroundColor: '#f0f2f5', border: '1px solid #e9edef', color: '#111b21', fontSize: '15px', outline: 'none' },
+  passwordEyeToggleBtn: { position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center' },
+  primaryButton: { width: '100%', padding: '12px', borderRadius: '10px', background: 'linear-gradient(135deg, #00a884 0%, #128c7e 100%)', color: '#ffffff', border: 'none', fontWeight: '700', fontSize: '15px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' },
+  switchAuthText: { textAlign: 'center', fontSize: '14px', color: '#667781', marginTop: '20px' },
+  switchAuthLink: { color: '#00a884', fontWeight: '700', cursor: 'pointer' },
 
-  sidebar: { borderRight: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', backgroundColor: '#f8fafc' },
-  profileSection: { padding: '16px 20px', display: 'flex', alignItems: 'center', gap: '12px', borderBottom: '1px solid #e2e8f0', backgroundColor: '#ffffff' },
+  sidebar: { borderRight: '1px solid #e9edef', display: 'flex', flexDirection: 'column', backgroundColor: '#ffffff', position: 'relative', height: '100dvh', boxSizing: 'border-box' },
+  profileSection: { padding: '10px 16px', display: 'flex', alignItems: 'center', gap: '12px', borderBottom: '1px solid #e9edef', backgroundColor: '#f0f2f5', flexShrink: 0 },
   profileDetails: { flex: 1, overflow: 'hidden' },
-  profileUsername: { fontWeight: '700', fontSize: '15px', color: '#0f172a', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' },
-  profileEmail: { fontSize: '12px', color: '#64748b', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' },
+  profileUsername: { fontWeight: '700', fontSize: '15px', color: '#111b21', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' },
+  profileEmail: { fontSize: '12px', color: '#667781', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' },
   headerIcons: { display: 'flex', gap: '4px' },
-  iconButton: { padding: '8px', background: 'transparent', border: 'none', color: '#64748b', cursor: 'pointer', borderRadius: '8px' },
+  iconButton: { padding: '8px', background: 'transparent', border: 'none', color: '#54656f', cursor: 'pointer', borderRadius: '50%' },
 
-  tabNav: { display: 'flex', padding: '6px', margin: '10px 14px', backgroundColor: '#e2e8f0', borderRadius: '12px', gap: '2px' },
-  tabBtn: { flex: 1, padding: '9px 4px', background: 'transparent', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', fontWeight: '600' },
-  activeTabBtn: { flex: 1, padding: '9px 4px', backgroundColor: '#ffffff', border: 'none', color: '#0f172a', cursor: 'pointer', fontSize: '12px', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', fontWeight: '700', boxShadow: '0 2px 4px rgba(0,0,0,0.06)' },
-  badge: { backgroundColor: '#ef4444', color: '#fff', fontSize: '10px', borderRadius: '10px', padding: '1px 5px', fontWeight: 'bold' },
+  tabNav: { display: 'flex', padding: '6px', margin: '8px 12px', backgroundColor: '#f0f2f5', borderRadius: '12px', gap: '2px', flexShrink: 0 },
+  tabBtn: { flex: 1, padding: '9px 4px', background: 'transparent', border: 'none', color: '#54656f', cursor: 'pointer', fontSize: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', fontWeight: '600' },
+  activeTabBtn: { flex: 1, padding: '9px 4px', backgroundColor: '#ffffff', border: '1px solid #e9edef', color: '#00a884', cursor: 'pointer', fontSize: '12px', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', fontWeight: '700', boxShadow: '0 2px 4px rgba(0,0,0,0.06)' },
+  badge: { backgroundColor: '#25d366', color: '#fff', fontSize: '10px', borderRadius: '10px', padding: '1px 5px', fontWeight: 'bold' },
 
-  listArea: { flex: 1, overflowY: 'auto', padding: '0 10px 14px' },
-  newGroupBtn: { width: '100%', boxSizing: 'border-box', margin: '4px 0 6px', padding: '11px', borderRadius: '10px', backgroundColor: '#ffffff', border: '1px dashed #94a3b8', color: '#2563eb', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', fontSize: '14px', fontWeight: '600' },
-  startNewChatBtn: { width: '100%', boxSizing: 'border-box', margin: '0 0 10px', padding: '11px', borderRadius: '10px', backgroundColor: '#2563eb', border: 'none', color: '#ffffff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', fontSize: '14px', fontWeight: '700', boxShadow: '0 2px 6px rgba(37,99,235,0.2)' },
-  sectionHeading: { padding: '10px 12px 6px', fontSize: '13px', fontWeight: '700', color: '#64748b' },
-  emptyListNotice: { textAlign: 'center', padding: '36px 16px', color: '#94a3b8', fontSize: '14px' },
+  listArea: { flex: 1, overflowY: 'auto', padding: '0', minHeight: 0 },
+  newGroupBtn: { width: 'calc(100% - 24px)', boxSizing: 'border-box', margin: '8px 12px 4px', padding: '10px', borderRadius: '10px', backgroundColor: '#ffffff', border: '1px dashed #00a884', color: '#00a884', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', fontSize: '13.5px', fontWeight: '600' },
+  startNewChatBtn: { width: 'calc(100% - 24px)', boxSizing: 'border-box', margin: '4px 12px 8px', padding: '10px', borderRadius: '10px', backgroundColor: '#00a884', border: 'none', color: '#ffffff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', fontSize: '13.5px', fontWeight: '700' },
+  
+  archiveRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', margin: '0 12px 8px', backgroundColor: '#f0f2f5', borderRadius: '12px', cursor: 'pointer', border: '1px solid #e9edef' },
+  archiveCountBadge: { backgroundColor: '#00a884', color: '#fff', fontSize: '11px', fontWeight: '800', borderRadius: '12px', padding: '2px 8px' },
 
-  chatRow: { display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 12px', borderRadius: '12px', cursor: 'pointer', margin: '4px 0', border: '1px solid #f1f5f9' },
-  groupAvatar: { width: '40px', height: '40px', borderRadius: '12px', backgroundColor: '#dbeafe', color: '#1d4ed8', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px', flexShrink: 0 },
+  filterPillsRow: { display: 'flex', gap: '6px', padding: '6px 12px 10px', borderBottom: '1px solid #f0f2f5' },
+  filterPill: { padding: '5px 12px', borderRadius: '18px', backgroundColor: '#f0f2f5', border: 'none', color: '#54656f', fontSize: '12px', fontWeight: '500', cursor: 'pointer' },
+  filterPillActive: { padding: '5px 12px', borderRadius: '18px', backgroundColor: '#d9fdd3', border: 'none', color: '#00a884', fontSize: '12px', fontWeight: '700' },
+
+  sectionHeading: { padding: '10px 16px 6px', fontSize: '13px', fontWeight: '700', color: '#54656f' },
+  emptyListNotice: { textAlign: 'center', padding: '36px 16px', color: '#8696a0', fontSize: '14px' },
+
+  chatRow: { display: 'flex', alignItems: 'center', gap: '14px', padding: '12px 16px', cursor: 'pointer', borderBottom: '1px solid #f0f2f5', transition: 'background 0.15s ease' },
+  groupAvatar: { width: '48px', height: '48px', borderRadius: '50%', backgroundColor: '#dfe5e7', color: '#54656f', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px', flexShrink: 0, cursor: 'pointer' },
   chatRowMeta: { flex: 1, overflow: 'hidden' },
-  chatRowTitle: { display: 'block', fontWeight: '700', fontSize: '14px', color: '#0f172a', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' },
-  chatRowSub: { display: 'block', fontSize: '12px', color: '#64748b', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', marginTop: '2px' },
+  chatRowTitle: { display: 'block', fontWeight: '600', fontSize: '15px', color: '#111b21', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' },
+  chatRowSub: { display: 'block', fontSize: '13px', color: '#667781', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', marginTop: '2px' },
+  unreadBadge: { backgroundColor: '#25d366', color: '#ffffff', fontSize: '11px', fontWeight: '800', borderRadius: '12px', minWidth: '18px', height: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' },
 
-  userRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 12px', borderBottom: '1px solid #e2e8f0', backgroundColor: '#ffffff', borderRadius: '10px', margin: '4px 0' },
-  userRowLeft: { display: 'flex', alignItems: 'center', gap: '10px', overflow: 'hidden' },
-  userName: { fontWeight: '700', fontSize: '14px', color: '#0f172a' },
-  userEmail: { fontSize: '12px', color: '#64748b' },
-  addBtn: { padding: '7px 16px', borderRadius: '8px', background: '#2563eb', color: '#fff', border: 'none', cursor: 'pointer', fontSize: '13px', fontWeight: '700' },
-  pendingBtn: { padding: '7px 12px', borderRadius: '8px', backgroundColor: '#f1f5f9', color: '#64748b', border: '1px solid #e2e8f0', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '4px', fontWeight: '600' },
-  respondBtn: { padding: '7px 14px', borderRadius: '8px', backgroundColor: '#10b981', color: '#fff', border: 'none', cursor: 'pointer', fontSize: '12px', fontWeight: '700' },
-  acceptBtn: { padding: '7px 16px', borderRadius: '8px', backgroundColor: '#10b981', color: '#fff', border: 'none', cursor: 'pointer', fontSize: '13px', fontWeight: '700' },
-  friendsTag: { fontSize: '12px', color: '#16a34a', display: 'flex', alignItems: 'center', gap: '3px', fontWeight: '700' },
-  chatFriendBtn: { padding: '6px 12px', borderRadius: '6px', background: '#2563eb', color: '#fff', border: 'none', cursor: 'pointer', fontSize: '12px', fontWeight: '700' },
-  removeFriendBtn: { padding: '6px 10px', borderRadius: '6px', background: '#fef2f2', border: '1px solid #fee2e2', color: '#dc2626', cursor: 'pointer', display: 'flex', alignItems: 'center' },
+  chatDotsBtn: { background: 'transparent', border: 'none', cursor: 'pointer', padding: '6px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' },
+  chatDropdownMenu: { position: 'absolute', right: '16px', top: '40px', backgroundColor: '#ffffff', borderRadius: '10px', boxShadow: '0 4px 16px rgba(0,0,0,0.15)', border: '1px solid #e9edef', zIndex: 50, padding: '4px' },
+  dropdownOptionBtn: { display: 'flex', alignItems: 'center', gap: '8px', width: '100%', padding: '8px 12px', background: 'none', border: 'none', fontSize: '13px', color: '#111b21', fontWeight: '600', cursor: 'pointer', borderRadius: '6px', whiteSpace: 'nowrap' },
 
-  chatWindow: { flex: 1, display: 'flex', flexDirection: 'column', backgroundColor: '#ffffff' },
-  windowHeader: { height: '64px', padding: '0 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #e2e8f0', backgroundColor: '#ffffff', zIndex: 10 },
-  windowHeaderInfo: { display: 'flex', alignItems: 'center', gap: '12px' },
-  backBtn: { background: 'transparent', border: 'none', cursor: 'pointer', color: '#0f172a', padding: '4px', marginRight: '4px' },
-  windowTitle: { margin: 0, fontSize: '16px', fontWeight: '700', color: '#0f172a' },
+  userRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 16px', borderBottom: '1px solid #f0f2f5', backgroundColor: '#ffffff' },
+  userRowLeft: { display: 'flex', alignItems: 'center', gap: '12px', overflow: 'hidden' },
+  userName: { fontWeight: '700', fontSize: '14px', color: '#111b21' },
+  userEmail: { fontSize: '12px', color: '#667781' },
+  addBtn: { padding: '6px 14px', borderRadius: '8px', background: '#00a884', color: '#fff', border: 'none', cursor: 'pointer', fontSize: '12px', fontWeight: '700' },
+  pendingBtn: { padding: '6px 12px', borderRadius: '8px', backgroundColor: '#f0f2f5', color: '#667781', border: '1px solid #e9edef', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '4px', fontWeight: '600' },
+  respondBtn: { padding: '6px 12px', borderRadius: '8px', backgroundColor: '#25d366', color: '#fff', border: 'none', cursor: 'pointer', fontSize: '12px', fontWeight: '700' },
+  acceptBtn: { padding: '6px 14px', borderRadius: '8px', backgroundColor: '#25d366', color: '#fff', border: 'none', cursor: 'pointer', fontSize: '12px', fontWeight: '700' },
+  friendsTag: { fontSize: '12px', color: '#00a884', display: 'flex', alignItems: 'center', gap: '3px', fontWeight: '700' },
+  chatFriendBtn: { padding: '6px 12px', borderRadius: '6px', background: '#00a884', color: '#fff', border: 'none', cursor: 'pointer', fontSize: '12px', fontWeight: '700' },
+  removeFriendBtn: { padding: '6px 10px', borderRadius: '6px', background: '#fef2f2', border: '1px solid #fee2e2', color: '#dc2626', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', fontWeight: '700' },
+
+  metaAiFloatingBtn: { position: 'absolute', right: '16px', bottom: '16px', width: '48px', height: '48px', cursor: 'pointer', zIndex: 40 },
+  metaAiGradientRing: { width: '100%', height: '100%', borderRadius: '50%', padding: '2.5px', boxShadow: '0 4px 14px rgba(0,0,0,0.18)' },
+  metaAiInnerCircle: { width: '100%', height: '100%', borderRadius: '50%', backgroundColor: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center' },
+
+  aiAssistantModalBox: { width: '92%', maxWidth: '420px', height: '520px', backgroundColor: '#ffffff', borderRadius: '18px', display: 'flex', flexDirection: 'column', boxShadow: '0 12px 36px rgba(0,0,0,0.22)', overflow: 'hidden' },
+  aiModalHeader: { padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f0f2f5', borderBottom: '1px solid #e9edef' },
+  aiMessageThread: { flex: 1, overflowY: 'auto', padding: '14px 16px', display: 'flex', flexDirection: 'column' },
+  aiBubble: { maxWidth: '82%', padding: '9px 13px', borderRadius: '12px', fontSize: '13.5px', lineHeight: '1.45', wordBreak: 'break-word', boxShadow: '0 1px 0.5px rgba(0,0,0,0.06)' },
+  aiComposerBar: { padding: '10px 14px', display: 'flex', gap: '8px', backgroundColor: '#f0f2f5', borderTop: '1px solid #e9edef' },
+  aiInput: { flex: 1, padding: '10px 14px', borderRadius: '20px', border: '1px solid #e9edef', outline: 'none', fontSize: '13.5px', backgroundColor: '#ffffff' },
+  aiSendBtn: { width: '38px', height: '38px', borderRadius: '50%', backgroundColor: '#00a884', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' },
+
+  chatWindow: { flex: 1, display: 'flex', flexDirection: 'column', backgroundColor: '#efeae2', position: 'relative', height: '100dvh', boxSizing: 'border-box', overflow: 'hidden' },
+  windowHeader: { height: '60px', minHeight: '60px', padding: '0 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #e9edef', backgroundColor: '#f0f2f5', zIndex: 10, flexShrink: 0 },
+  windowHeaderInfo: { display: 'flex', alignItems: 'center', gap: '12px', userSelect: 'none' },
+  backBtn: { background: 'transparent', border: 'none', cursor: 'pointer', color: '#54656f', padding: '4px', marginRight: '4px' },
+  windowTitle: { margin: 0, fontSize: '16px', fontWeight: '600', color: '#111b21' },
+  pollHeaderBtn: { display: 'flex', alignItems: 'center', gap: '6px', backgroundColor: '#ffffff', border: '1px solid #e9edef', color: '#00a884', padding: '6px 12px', borderRadius: '8px', cursor: 'pointer', fontSize: '13px', fontWeight: '600' },
+  addMemberHeaderBtn: { display: 'flex', alignItems: 'center', gap: '6px', backgroundColor: '#ffffff', border: '1px solid #e9edef', color: '#00a884', padding: '6px 12px', borderRadius: '8px', cursor: 'pointer', fontSize: '13px', fontWeight: '600' },
+  addMemberLinkBtn: { display: 'flex', alignItems: 'center', gap: '4px', background: 'none', border: 'none', color: '#00a884', cursor: 'pointer', fontSize: '12px', fontWeight: '700' },
   clearChatBtn: { display: 'flex', alignItems: 'center', gap: '6px', background: '#fef2f2', border: '1px solid #fecaca', color: '#dc2626', padding: '6px 12px', borderRadius: '8px', cursor: 'pointer', fontSize: '13px', fontWeight: '600' },
 
-  messagesContainer: { flex: 1, overflowY: 'auto', padding: '20px', display: 'flex', flexDirection: 'column', gap: '14px' },
-  messageRow: { display: 'flex', gap: '8px', width: '100%' },
-  messageBubbleWrapper: { display: 'flex', flexDirection: 'column', maxWidth: '72%' },
-  bubbleSenderName: { fontSize: '11px', color: '#64748b', marginBottom: '3px', marginLeft: '6px', fontWeight: '600' },
-  bubble: { borderRadius: '20px', fontSize: '15px', lineHeight: '1.45', wordBreak: 'break-word' },
-  myBubble: { background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)', color: '#ffffff', borderBottomRightRadius: '4px', boxShadow: '0 2px 6px rgba(37,99,235,0.2)' },
-  theirBubble: { backgroundColor: '#ffffff', color: '#0f172a', borderBottomLeftRadius: '4px', border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' },
-  messageTimestamp: { fontSize: '10px', color: '#94a3b8', marginTop: '3px', marginInline: '6px' },
-  msgOptionIconBtn: { background: 'transparent', border: 'none', cursor: 'pointer', padding: '4px', borderRadius: '4px', opacity: 0.7 },
+  messagesContainer: { flex: 1, minHeight: 0, overflowY: 'auto', padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: '4px', position: 'relative' },
+  messageRow: { display: 'flex', gap: '8px', width: '100%', margin: '2px 0' },
+  messageBubbleWrapper: { display: 'flex', flexDirection: 'column', maxWidth: '75%' },
+  bubbleSenderName: { fontSize: '12px', color: '#128c7e', marginBottom: '2px', marginLeft: '4px', fontWeight: '700' },
+  bubble: { borderRadius: '8px', fontSize: '14.5px', boxShadow: '0 1px 0.5px rgba(11,20,26,0.13)', position: 'relative' },
+  
+  replyQuoteBox: { borderLeft: '4px solid', padding: '4px 8px', borderRadius: '4px', marginBottom: '4px' },
+  quickHoverBar: { display: 'flex', alignItems: 'center', gap: '2px', backgroundColor: '#ffffff', border: '1px solid #e9edef', borderRadius: '16px', padding: '2px 4px', boxShadow: '0 2px 8px rgba(0,0,0,0.08)' },
+  quickIconBtn: { background: 'transparent', border: 'none', cursor: 'pointer', padding: '4px', borderRadius: '50%', color: '#54656f', display: 'flex', alignItems: 'center', justifyContent: 'center' },
+  
+  whatsappReactionPopup: { position: 'absolute', bottom: '100%', marginBottom: '6px', backgroundColor: '#ffffff', borderRadius: '24px', boxShadow: '0 4px 14px rgba(0,0,0,0.15)', display: 'flex', padding: '4px 6px', gap: '3px', zIndex: 30, border: '1px solid #e9edef' },
+  reactionEmojiBtn: { background: 'none', border: 'none', fontSize: '18px', cursor: 'pointer', padding: '2px 5px', borderRadius: '50%' },
+  extendedReactionGrid: { position: 'absolute', bottom: '110%', left: 0, width: '220px', height: '140px', backgroundColor: '#ffffff', borderRadius: '12px', boxShadow: '0 4px 16px rgba(0,0,0,0.18)', display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', overflowY: 'auto', padding: '6px', zIndex: 40, border: '1px solid #e9edef' },
+  gridEmojiSpan: { fontSize: '18px', padding: '4px', textAlign: 'center', cursor: 'pointer' },
 
-  inputContainer: { padding: '14px 20px', backgroundColor: '#ffffff', borderTop: '1px solid #e2e8f0' },
-  composerForm: { display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '30px', padding: '4px 6px 4px 14px' },
-  composerIconBtn: { background: 'transparent', border: 'none', cursor: 'pointer', padding: '6px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%' },
-  composerInput: { flex: 1, backgroundColor: 'transparent', border: 'none', color: '#0f172a', fontSize: '15px', outline: 'none', padding: '8px 4px' },
-  sendBtn: { width: '38px', height: '38px', borderRadius: '50%', background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)', color: '#ffffff', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center' },
+  reactionBadgeRow: { display: 'flex', gap: '4px', marginTop: '1px', flexWrap: 'wrap' },
+  reactionPill: { border: '1px solid', borderRadius: '12px', padding: '1px 6px', fontSize: '11px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '2px' },
+  statusMeta: { fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '3px', marginLeft: '4px' },
+  typingBubble: { backgroundColor: '#ffffff', borderRadius: '18px', padding: '8px 14px', display: 'inline-flex', alignItems: 'center', boxShadow: '0 1px 0.5px rgba(11,20,26,0.13)' },
+
+  loadOlderBtn: { backgroundColor: '#ffffff', border: '1px solid #e9edef', color: '#00a884', padding: '6px 14px', borderRadius: '16px', fontSize: '12.5px', fontWeight: '700', cursor: 'pointer', boxShadow: '0 2px 5px rgba(0,0,0,0.06)' },
+  viewOnceBubbleCard: { backgroundColor: '#ffffff', border: '1px solid #e9edef', borderRadius: '10px', padding: '8px 12px', cursor: 'pointer', minWidth: '180px' },
+  viewOnceIconBadge: { width: '30px', height: '30px', borderRadius: '50%', backgroundColor: '#ef4444', display: 'flex', alignItems: 'center', justifyContent: 'center' },
+
+  youtubeCardWrapper: { borderRadius: '8px', overflow: 'hidden', border: '1px solid #e9edef', backgroundColor: '#ffffff', cursor: 'pointer', marginBottom: '4px' },
+  youtubePlayOverlay: { position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.3)' },
+
+  pollOptionBox: { position: 'relative', border: '1px solid', borderRadius: '8px', padding: '8px 10px', overflow: 'hidden' },
+  pollProgressBar: { position: 'absolute', top: 0, bottom: '0', left: 0, zIndex: 1, transition: 'width 0.3s ease' },
+
+  floatingDownBtn: { position: 'absolute', right: '20px', bottom: '80px', width: '42px', height: '42px', borderRadius: '50%', backgroundColor: '#ffffff', border: '1px solid #e9edef', boxShadow: '0 2px 8px rgba(0,0,0,0.15)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 25 },
+
+  replyBanner: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 16px', backgroundColor: '#f0f2f5', borderTop: '1px solid #e9edef', borderLeft: '4px solid #00a884', flexShrink: 0 },
+  bannerCloseBtn: { background: 'none', border: 'none', cursor: 'pointer', color: '#54656f' },
+
+  composerEmojiDrawer: { position: 'absolute', bottom: '70px', left: '16px', width: '300px', height: '180px', backgroundColor: '#ffffff', borderRadius: '14px', boxShadow: '0 6px 20px rgba(0,0,0,0.15)', display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', overflowY: 'auto', padding: '8px', zIndex: 20, border: '1px solid #e9edef' },
+
+  inputContainer: { padding: '10px 16px', backgroundColor: '#f0f2f5', borderTop: '1px solid #e9edef', position: 'relative', flexShrink: 0 },
+  composerForm: { display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: '#ffffff', borderRadius: '8px', padding: '4px 6px 4px 10px', boxShadow: '0 1px 0.5px rgba(11,20,26,0.08)' },
+  composerIconBtn: { background: 'transparent', border: 'none', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center' },
+  composerInput: { flex: 1, backgroundColor: 'transparent', border: 'none', color: '#111b21', fontSize: '15px', outline: 'none', padding: '8px 4px' },
+  sendBtn: { width: '36px', height: '36px', borderRadius: '50%', background: '#00a884', color: '#ffffff', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center' },
 
   notFriendsGateBanner: { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', backgroundColor: '#fffbeb', border: '1px solid #fef3c7', padding: '12px 16px', borderRadius: '12px', color: '#b45309', fontSize: '14px', fontWeight: '600' },
 
-  recordingBar: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#fef2f2', border: '1px solid #fecaca', borderRadius: '30px', padding: '8px 16px' },
+  recordingBar: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#fef2f2', border: '1px solid #fecaca', borderRadius: '12px', padding: '8px 16px' },
   recordingPulse: { width: '12px', height: '12px', borderRadius: '50%', backgroundColor: '#dc2626', animation: 'pulse 1.5s infinite' },
   stopRecordBtn: { display: 'flex', alignItems: 'center', gap: '6px', backgroundColor: '#dc2626', color: '#fff', border: 'none', padding: '6px 14px', borderRadius: '20px', fontSize: '13px', fontWeight: '700', cursor: 'pointer' },
 
-  emptyStateContainer: { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '24px' },
-  emptyStateIcon: { width: '84px', height: '84px', borderRadius: '50%', backgroundColor: '#f8fafc', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '16px', border: '1px solid #e2e8f0' },
+  emptyStateContainer: { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '24px', backgroundColor: '#f0f2f5' },
+  emptyStateIcon: { width: '90px', height: '90px', borderRadius: '50%', backgroundColor: '#d9fdd3', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '16px' },
+
+  snapchatToast: { position: 'fixed', top: '16px', left: '50%', transform: 'translateX(-50%)', backgroundColor: '#ffffff', borderRadius: '16px', padding: '10px 14px', display: 'flex', alignItems: 'center', gap: '12px', boxShadow: '0 10px 30px rgba(0,0,0,0.18)', border: '1px solid #e9edef', width: '92%', maxWidth: '380px', zIndex: 300, cursor: 'pointer' },
+  snapToastAvatar: { width: '38px', height: '38px', borderRadius: '50%', objectFit: 'cover' },
+  snapToastPlaceholder: { width: '38px', height: '38px', borderRadius: '50%', backgroundColor: '#00a884', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '800', fontSize: '16px' },
+  snapCloseBtn: { background: 'none', border: 'none', cursor: 'pointer', padding: '4px' },
+
+  lightboxBackdrop: { position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(5px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200, padding: '20px' },
+  lightboxContainer: { display: 'flex', flexDirection: 'column', maxWidth: '90vw', maxHeight: '90vh', alignItems: 'center' },
+  lightboxHeader: { width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' },
+  lightboxCloseBtn: { background: 'transparent', border: 'none', cursor: 'pointer', padding: '4px' },
+  lightboxImage: { maxWidth: '100%', maxHeight: '82vh', objectFit: 'contain', borderRadius: '10px', boxShadow: '0 10px 40px rgba(0,0,0,0.5)' },
+
+  viewOnceModalBox: { backgroundColor: '#ffffff', borderRadius: '20px', padding: '20px', width: '100%', maxWidth: '360px', display: 'flex', flexDirection: 'column', boxShadow: '0 20px 40px rgba(0,0,0,0.2)' },
+  viewOncePreviewImg: { maxWidth: '100%', maxHeight: '220px', objectFit: 'contain', borderRadius: '8px' },
+  viewOnceCheckboxRow: { display: 'flex', alignItems: 'center', gap: '10px', marginTop: '12px', cursor: 'pointer', userSelect: 'none' },
+
+  profilePopoverBox: { backgroundColor: '#ffffff', borderRadius: '20px', padding: '20px', width: '100%', maxWidth: '300px', display: 'flex', flexDirection: 'column', alignItems: 'center', boxShadow: '0 20px 40px rgba(0,0,0,0.2)' },
+  profilePopoverHead: { width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
+  profilePopoverImg: { width: '170px', height: '170px', borderRadius: '50%', objectFit: 'cover', cursor: 'pointer', boxShadow: '0 4px 16px rgba(0,0,0,0.1)' },
+  profilePopoverPlaceholder: { width: '170px', height: '170px', borderRadius: '50%', backgroundColor: '#dbeafe', color: '#00a884', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '64px', fontWeight: '800' },
+  profilePopoverActions: { width: '100%', marginTop: '10px' },
 
   modalBackdrop: { position: 'fixed', inset: 0, backgroundColor: 'rgba(15,23,42,0.45)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, padding: '16px' },
-  modalBox: { backgroundColor: '#ffffff', border: '1px solid #e2e8f0', width: '100%', maxWidth: '440px', borderRadius: '20px', padding: '24px', boxShadow: '0 20px 40px rgba(0,0,0,0.1)' },
+  modalBox: { backgroundColor: '#ffffff', border: '1px solid #e9edef', width: '100%', maxWidth: '440px', borderRadius: '20px', padding: '24px', boxShadow: '0 20px 40px rgba(0,0,0,0.1)' },
   modalHead: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' },
-  closeBtn: { background: 'transparent', border: 'none', color: '#64748b', cursor: 'pointer' },
+  closeBtn: { background: 'transparent', border: 'none', color: '#54656f', cursor: 'pointer' },
 
-  settingsTabRow: { display: 'flex', gap: '4px', backgroundColor: '#f1f5f9', padding: '4px', borderRadius: '10px', marginBottom: '16px' },
-  settingsTab: { flex: 1, padding: '8px 2px', fontSize: '12px', fontWeight: '600', color: '#64748b', background: 'transparent', border: 'none', cursor: 'pointer', borderRadius: '6px' },
-  settingsTabActive: { flex: 1, padding: '8px 2px', fontSize: '12px', fontWeight: '700', color: '#0f172a', backgroundColor: '#ffffff', border: 'none', cursor: 'pointer', borderRadius: '6px', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' },
+  settingsTabRow: { display: 'flex', gap: '4px', backgroundColor: '#f0f2f5', padding: '4px', borderRadius: '10px', marginBottom: '16px' },
+  settingsTab: { flex: 1, padding: '8px 2px', fontSize: '12px', fontWeight: '600', color: '#54656f', background: 'transparent', border: 'none', cursor: 'pointer', borderRadius: '6px' },
+  settingsTabActive: { flex: 1, padding: '8px 2px', fontSize: '12px', fontWeight: '700', color: '#111b21', backgroundColor: '#ffffff', border: '1px solid #e9edef', cursor: 'pointer', borderRadius: '6px', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' },
 
-  avatarCameraBadge: { position: 'absolute', bottom: '0', right: '0', backgroundColor: '#2563eb', border: '2px solid #ffffff', borderRadius: '50%', width: '28px', height: '28px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' },
+  credentialsViewerCard: { backgroundColor: '#f0f2f5', borderRadius: '12px', padding: '12px 14px', border: '1px solid #e9edef', display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '4px' },
+  credentialRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
+
+  avatarCameraBadge: { position: 'absolute', bottom: '0', right: '0', backgroundColor: '#00a884', border: '2px solid #ffffff', borderRadius: '50%', width: '28px', height: '28px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' },
   colorPresetBtn: { width: '36px', height: '36px', borderRadius: '8px', cursor: 'pointer', border: 'none' },
-  resetBtn: { width: '100%', padding: '10px', borderRadius: '10px', backgroundColor: '#f8fafc', border: '1px solid #cbd5e1', color: '#475569', fontSize: '13px', fontWeight: '600', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', marginTop: '6px' },
+  resetBtn: { width: '100%', padding: '10px', borderRadius: '10px', backgroundColor: '#f0f2f5', border: '1px solid #e9edef', color: '#475569', fontSize: '13px', fontWeight: '600', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', marginTop: '6px' },
 
-  modalListLabel: { fontSize: '13px', color: '#64748b', margin: '14px 0 6px', fontWeight: '600' },
-  modalScrollList: { maxHeight: '200px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px' },
-  modalFriendRow: { display: 'flex', alignItems: 'center', gap: '12px', padding: '8px 10px', borderRadius: '10px', backgroundColor: '#f8fafc', border: '1px solid #e2e8f0', cursor: 'pointer' },
-  openChatBtn: { padding: '6px 14px', borderRadius: '8px', background: '#2563eb', color: '#fff', border: 'none', cursor: 'pointer', fontSize: '12px', fontWeight: '700' },
-  checkboxItem: { display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', color: '#0f172a', cursor: 'pointer' },
+  modalListLabel: { fontSize: '13px', color: '#667781', margin: '14px 0 6px', fontWeight: '600' },
+  modalScrollList: { maxHeight: '220px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px' },
+  modalFriendRow: { display: 'flex', alignItems: 'center', gap: '12px', padding: '8px 10px', borderRadius: '10px', backgroundColor: '#f0f2f5', border: '1px solid #e9edef' },
+  openChatBtn: { padding: '6px 14px', borderRadius: '8px', background: '#00a884', color: '#fff', border: 'none', cursor: 'pointer', fontSize: '12px', fontWeight: '700' },
+  checkboxItem: { display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', color: '#111b21', cursor: 'pointer' },
+  groupOwnerBadge: { display: 'flex', alignItems: 'center', gap: '4px', backgroundColor: '#fef3c7', color: '#b45309', border: '1px solid #fde68a', padding: '3px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: '700' },
+  removeMemberBtn: { display: 'flex', alignItems: 'center', gap: '4px', backgroundColor: '#fef2f2', border: '1px solid #fecaca', color: '#dc2626', padding: '4px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: '700', cursor: 'pointer' },
+  leaveGroupBtn: { width: '100%', padding: '10px', borderRadius: '10px', backgroundColor: '#fef2f2', border: '1px solid #fecaca', color: '#dc2626', fontWeight: '700', fontSize: '13px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' },
   modalActions: { display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '14px' },
-  secondaryBtn: { width: '100%', padding: '10px 16px', borderRadius: '10px', backgroundColor: '#f1f5f9', color: '#334155', border: '1px solid #e2e8f0', cursor: 'pointer', fontSize: '14px', fontWeight: '600', display: 'flex', alignItems: 'center', justifyContent: 'center' },
-  deleteChoiceBtn: { width: '100%', padding: '10px 16px', borderRadius: '10px', backgroundColor: '#f8fafc', color: '#0f172a', border: '1px solid #cbd5e1', cursor: 'pointer', fontSize: '14px', fontWeight: '600' },
+  secondaryBtn: { width: '100%', padding: '10px 16px', borderRadius: '10px', backgroundColor: '#f0f2f5', color: '#334155', border: '1px solid #e9edef', cursor: 'pointer', fontSize: '14px', fontWeight: '600', display: 'flex', alignItems: 'center', justifyContent: 'center' },
+  deleteChoiceBtn: { width: '100%', padding: '10px 16px', borderRadius: '10px', backgroundColor: '#f0f2f5', color: '#111b21', border: '1px solid #e9edef', cursor: 'pointer', fontSize: '14px', fontWeight: '600' },
   fieldLabel: { fontSize: '13px', color: '#475569', fontWeight: '600', marginBottom: '4px', display: 'block' },
   statusMessage: { padding: '9px 12px', borderRadius: '8px', fontSize: '13px', marginBottom: '12px', fontWeight: '500' },
 
   optionSelectorGroup: { display: 'flex', gap: '6px', marginTop: '4px' },
-  optionBtn: { flex: 1, padding: '8px 4px', fontSize: '12px', fontWeight: '600', backgroundColor: '#f1f5f9', color: '#64748b', border: '1px solid #e2e8f0', borderRadius: '8px', cursor: 'pointer' },
-  optionSelectedBtn: { flex: 1, padding: '8px 4px', fontSize: '12px', fontWeight: '700', backgroundColor: '#2563eb', color: '#ffffff', border: '1px solid #2563eb', borderRadius: '8px', cursor: 'pointer' },
-  emailBackupNotice: { display: 'flex', alignItems: 'flex-start', gap: '6px', fontSize: '12px', color: '#64748b', backgroundColor: '#f8fafc', padding: '8px 10px', borderRadius: '8px', border: '1px solid #e2e8f0' },
+  optionBtn: { flex: 1, padding: '8px 4px', fontSize: '12px', fontWeight: '600', backgroundColor: '#f0f2f5', color: '#54656f', border: '1px solid #e9edef', borderRadius: '8px', cursor: 'pointer' },
+  optionSelectedBtn: { flex: 1, padding: '8px 4px', fontSize: '12px', fontWeight: '700', color: '#ffffff', backgroundColor: '#00a884', border: '1px solid #00a884', borderRadius: '8px', cursor: 'pointer' },
+  emailBackupNotice: { display: 'flex', alignItems: 'flex-start', gap: '6px', fontSize: '12px', color: '#54656f', backgroundColor: '#f0f2f5', padding: '8px 10px', borderRadius: '8px', border: '1px solid #e9edef' },
 
   dangerZone: { border: '1px solid #fee2e2', backgroundColor: '#fff5f5', borderRadius: '12px', padding: '14px' },
   deleteInitBtn: { width: '100%', padding: '10px', borderRadius: '8px', backgroundColor: '#ef4444', color: '#ffffff', border: 'none', fontWeight: '700', fontSize: '13px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' },
