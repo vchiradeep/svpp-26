@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from './supabaseClient';
 import emailjs from '@emailjs/browser';
+import { askAiAssistant } from './services/aiService';
 import { 
   MessageSquare, Users, UserPlus, Settings, LogOut, Send, 
   Check, Clock, Plus, KeyRound, Sparkles, X, ChevronLeft, 
@@ -9,7 +10,7 @@ import {
   UserCheck, UserX, MessageCircle, Smile, Edit2, CornerUpLeft, 
   CheckCheck, AlertCircle, ChevronDown, Crown, User, UserMinus, 
   Eye, EyeOff, Bot, HelpCircle, Flame, Lock, Archive, ShieldCheck, 
-  BarChart2, ExternalLink, Play
+  BarChart2, ExternalLink, Play, Tag
 } from 'lucide-react';
 
 const EMAILJS_SERVICE_ID = 'service_l1fiok5';
@@ -34,17 +35,6 @@ const EMOJI_PALETTE = [
 
 const FAVICON_SVG = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="28" cy="36" r="15" fill="%230f172a"/><path d="M12 88 C12 62 44 62 44 88 Z" fill="%230f172a"/><circle cx="72" cy="36" r="15" fill="%230f172a"/><path d="M56 88 C56 62 88 62 88 88 Z" fill="%230f172a"/><path d="M38 28 C38 18 64 18 64 28 C64 35 55 37 49 41 L43 45 L45 39 C39 39 38 34 38 28 Z" fill="%230f172a"/><rect x="43" y="24" width="16" height="2.5" rx="1.2" fill="%23ffffff"/><rect x="43" y="29" width="16" height="2.5" rx="1.2" fill="%23ffffff"/></svg>`;
 
-const SYSTEM_AI_PROMPT = `You are Meta AI in svpp-chat, an advanced real-time messenger built with React and Supabase.
-You can answer ANY question the user asks accurately: science, coding, math, general knowledge, history, translations, writing, and advice.
-You also know all svpp-chat app features:
-1. Created for real-time messaging with Supabase Auth & WebSockets.
-2. Group chats: The creator is labeled "Owner" with a golden crown and has full rights to remove members.
-3. Read receipts: 1 gray checkmark for Sent, 2 blue checkmarks for Seen, with seen counters for groups.
-4. Message options: Edit messages, quote replies, WhatsApp 5 quick reactions, delete for me, delete for everyone.
-5. Live indicators: Continuous typing with 3 animated dots and avatar, Snapchat-style top pop-up notification banners with audio pop sounds.
-6. Rich media & security: YouTube video thumbnail embeds, group polls, view-once photos, archived chats with PIN security, account deletion ("Account deleted"), and unfriended status ("unfriend").
-Be helpful, accurate, polite, and concise.`;
-
 const playPopNotificationSound = () => {
   try {
     const AudioContextClass = window.AudioContext || window.webkitAudioContext;
@@ -67,40 +57,21 @@ const playPopNotificationSound = () => {
   } catch (err) {}
 };
 
-const compressImage = (file, maxWidth = 800, maxHeight = 800, quality = 0.75) => {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = (event) => {
-      const img = new Image();
-      img.src = event.target.result;
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        let width = img.width;
-        let height = img.height;
+const uploadMediaToSupabaseStorage = async (file) => {
+  const fileExt = file.name.split('.').pop();
+  const fileName = `${Math.random().toString(36).substring(2)}_${Date.now()}.${fileExt}`;
+  
+  const { error: uploadError } = await supabase.storage
+    .from('chat-media')
+    .upload(fileName, file);
 
-        if (width > height) {
-          if (width > maxWidth) {
-            height = Math.round((height * maxWidth) / width);
-            width = maxWidth;
-          }
-        } else {
-          if (height > maxHeight) {
-            width = Math.round((height * maxHeight) / height);
-            height = maxHeight;
-          }
-        }
+  if (uploadError) throw uploadError;
 
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL('image/jpeg', quality));
-      };
-      img.onerror = (err) => reject(err);
-    };
-    reader.onerror = (err) => reject(err);
-  });
+  const { data } = supabase.storage
+    .from('chat-media')
+    .getPublicUrl(fileName);
+
+  return data.publicUrl;
 };
 
 const extractYouTubeId = (text) => {
@@ -110,13 +81,83 @@ const extractYouTubeId = (text) => {
   return (match && match[2].length === 11) ? match[2] : null;
 };
 
+const renderMessageTextWithLinks = (text) => {
+  if (!text) return null;
+  const urlRegex = /(https?:\/\/[^\s]+)/g;
+  const parts = text.split(urlRegex);
+
+  return parts.map((part, index) => {
+    if (part.match(urlRegex)) {
+      return (
+        <a
+          key={index}
+          href={part}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{ color: '#0284c7', textDecoration: 'underline', wordBreak: 'break-all' }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {part}
+        </a>
+      );
+    }
+    return part;
+  });
+};
+
+const formatLastSeen = (isoString) => {
+  if (!isoString) return 'offline';
+  const diffSecs = Math.floor((new Date() - new Date(isoString)) / 1000);
+  if (diffSecs < 60) return 'last seen just now';
+  const diffMins = Math.floor(diffSecs / 60);
+  if (diffMins < 60) return `last seen ${diffMins}m ago`;
+  const diffHours = Math.floor(diffMins / 60);
+  if (diffHours < 24) return `last seen ${diffHours}h ago`;
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays === 1) return 'last seen yesterday';
+  return `last seen ${diffDays}d ago`;
+};
+
+const formatChatTimestamp = (isoString) => {
+  if (!isoString) return '';
+  const date = new Date(isoString);
+  const now = new Date();
+  const isToday = date.toDateString() === now.toDateString();
+  const yesterday = new Date();
+  yesterday.setDate(now.getDate() - 1);
+  const isYesterday = date.toDateString() === yesterday.toDateString();
+
+  if (isToday) {
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  } else if (isYesterday) {
+    return 'Yesterday';
+  } else {
+    return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+  }
+};
+
+const getMessageDateLabel = (isoString) => {
+  if (!isoString) return '';
+  const date = new Date(isoString);
+  const now = new Date();
+  const isToday = date.toDateString() === now.toDateString();
+  const yesterday = new Date();
+  yesterday.setDate(now.getDate() - 1);
+  const isYesterday = date.toDateString() === yesterday.toDateString();
+
+  if (isToday) return 'Today';
+  if (isYesterday) return 'Yesterday';
+  return date.toLocaleDateString([], { month: 'long', day: 'numeric', year: 'numeric' });
+};
+
 export default function App() {
   const [session, setSession] = useState(null);
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
 
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
-  const [onlineUserIds, setOnlineUserIds] = useState(new Set());
+  const [onlinePresenceState, setOnlinePresenceState] = useState({});
+  const [userLastSeen, setUserLastSeen] = useState({});
 
   const [authMode, setAuthMode] = useState('login');
   const [email, setEmail] = useState('');
@@ -133,6 +174,13 @@ export default function App() {
   });
   const [showSavedPassword, setShowSavedPassword] = useState(false);
   const [showArchivePin, setShowArchivePin] = useState(false);
+
+  const [nicknames, setNicknames] = useState({});
+  const [showNicknameModal, setShowNicknameModal] = useState(false);
+  const [nicknameInput, setNicknameInput] = useState('');
+  const [nicknameTargetUser, setNicknameTargetUser] = useState(null);
+  const [reactionDetailsTarget, setReactionDetailsTarget] = useState(null);
+  const [tappedMessageId, setTappedMessageId] = useState(null);
 
   const [activeTab, setActiveTab] = useState('chats');
   const [chatFilter, setChatFilter] = useState('all');
@@ -155,7 +203,10 @@ export default function App() {
 
   const [activeConversation, setActiveConversation] = useState(null);
   const [activeConvMembers, setActiveConvMembers] = useState([]);
+  
+  const [messagesCache, setMessagesCache] = useState({});
   const [messages, setMessages] = useState([]);
+  const [selectedMessageIds, setSelectedMessageIds] = useState([]);
   const [newMessage, setNewMessage] = useState('');
   const [requests, setRequests] = useState([]);
   const [hasMoreMessages, setHasMoreMessages] = useState(false);
@@ -175,9 +226,37 @@ export default function App() {
   const activeConversationRef = useRef(null);
 
   const [showAiModal, setShowAiModal] = useState(false);
-  const [aiMessages, setAiMessages] = useState([
-    { id: 1, sender: 'ai', text: 'Hi! I am your Meta AI Assistant. Ask me any question in the world, or ask about any svpp-chat feature!' }
-  ]);
+  
+  const [aiChats, setAiChats] = useState(() => {
+    try {
+      const saved = localStorage.getItem('svpp_ai_chats_data');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return [
+      { id: 1, title: 'Chat 1', messages: [{ id: 1, sender: 'ai', text: 'Hi! I am your Meta AI Assistant. Ask me anything in Chat 1!' }] },
+      { id: 2, title: 'Chat 2', messages: [{ id: 1, sender: 'ai', text: 'Hello! Welcome to Chat 2. What can I help you with here?' }] },
+      { id: 3, title: 'Chat 3', messages: [{ id: 1, sender: 'ai', text: 'Hi there! This is Chat 3. Ready for your questions!' }] }
+    ];
+  });
+  const [activeAiChatId, setActiveAiChatId] = useState(1);
+
+  useEffect(() => {
+    localStorage.setItem('svpp_ai_chats_data', JSON.stringify(aiChats));
+  }, [aiChats]);
+
+  const currentAiChat = aiChats.find(c => c.id === activeAiChatId) || aiChats[0];
+  const aiMessages = currentAiChat.messages;
+
+  const updateActiveChatMessages = (newMsgsUpdater) => {
+    setAiChats(prev => prev.map(c => {
+      if (c.id === activeAiChatId) {
+        const updatedMsgs = typeof newMsgsUpdater === 'function' ? newMsgsUpdater(c.messages) : newMsgsUpdater;
+        return { ...c, messages: updatedMsgs };
+      }
+      return c;
+    }));
+  };
+
   const [aiInput, setAiInput] = useState('');
   const [isAiResponding, setIsAiResponding] = useState(false);
   const aiChatEndRef = useRef(null);
@@ -195,7 +274,6 @@ export default function App() {
     }
   });
 
-  const [selectedMessageForDelete, setSelectedMessageForDelete] = useState(null);
   const [editingMessage, setEditingMessage] = useState(null);
   const [replyingTo, setReplyingTo] = useState(null);
   const [reactions, setReactions] = useState([]);
@@ -204,9 +282,6 @@ export default function App() {
   const [showExtendedReactions, setShowExtendedReactions] = useState(false);
   const [showComposerEmojiPicker, setShowComposerEmojiPicker] = useState(false);
   const [sendingStatuses, setSendingStatuses] = useState({});
-
-  const [mobileContextMenuMsg, setMobileContextMenuMsg] = useState(null);
-  const touchTimerRef = useRef(null);
 
   const [pendingImageUpload, setPendingImageUpload] = useState(null);
   const [isViewOnceChecked, setIsViewOnceChecked] = useState(false);
@@ -260,6 +335,48 @@ export default function App() {
   useEffect(() => {
     activeConversationRef.current = activeConversation;
   }, [activeConversation]);
+
+  useEffect(() => {
+    if (!profile?.id) return;
+    try {
+      const savedNicks = localStorage.getItem(`svpp_nicknames_${profile.id}`);
+      if (savedNicks) setNicknames(JSON.parse(savedNicks));
+      
+      if (profile.nicknames_map) {
+        setNicknames(prev => ({ ...prev, ...profile.nicknames_map }));
+      }
+    } catch {
+      setNicknames({});
+    }
+  }, [profile?.id]);
+
+  const saveNicknameForUser = async (targetUserId, nick) => {
+    if (!profile?.id) return;
+    const updated = { ...nicknames, [targetUserId]: nick.trim() };
+    if (!nick.trim()) delete updated[targetUserId];
+    setNicknames(updated);
+    
+    localStorage.setItem(`svpp_nicknames_${profile.id}`, JSON.stringify(updated));
+
+    try {
+      await supabase
+        .from('profiles')
+        .update({ nicknames_map: updated })
+        .eq('id', profile.id);
+    } catch (err) {
+      console.error('Failed to sync nickname to Supabase:', err);
+    }
+
+    setShowNicknameModal(false);
+    setNicknameInput('');
+    setNicknameTargetUser(null);
+  };
+
+  const getDisplayName = (userObj) => {
+    if (!userObj) return 'User';
+    if (nicknames[userObj.id]) return nicknames[userObj.id];
+    return userObj.username || 'User';
+  };
 
   useEffect(() => {
     let link = document.querySelector("link[rel~='icon']");
@@ -316,16 +433,14 @@ export default function App() {
     const activeTypingList = Object.values(typingUsers);
 
     if (activeTypingList.length > 0) {
-      const typingName = activeConversation?.is_group
-        ? `${activeTypingList.map((u) => u.username).join(', ')} is typing...`
-        : 'typing...';
-      document.title = `${typingName} • svpp-chat`;
+      const typingName = activeTypingList.map((u) => getDisplayName(u)).join(', ');
+      document.title = `${typingName} is typing... • svpp-chat`;
     } else if (totalUnread > 0) {
-      document.title = `(${totalUnread}) unread message${totalUnread > 1 ? 's' : ''} • svpp-chat`;
+      document.title = `(${totalUnread}) new message${totalUnread > 1 ? 's' : ''} • svpp-chat`;
     } else {
       document.title = 'svpp-chat';
     }
-  }, [unreadCounts, typingUsers, activeConversation]);
+  }, [unreadCounts, typingUsers, nicknames]);
 
   useEffect(() => {
     const handleResize = () => setIsMobile(window.innerWidth <= 768);
@@ -386,21 +501,78 @@ export default function App() {
       config: { presence: { key: profile.id } }
     });
 
+    const updatePresence = () => {
+      const isOnlineNow = document.visibilityState === 'visible';
+      presenceChannel.track({
+        online_at: new Date().toISOString(),
+        isOnline: isOnlineNow,
+      });
+    };
+
     presenceChannel
       .on('presence', { event: 'sync' }, () => {
         const state = presenceChannel.presenceState();
-        setOnlineUserIds(new Set(Object.keys(state)));
+        setOnlinePresenceState(state);
+        
+        setUserLastSeen(prev => {
+          const next = { ...prev };
+          Object.keys(state).forEach(uid => {
+            const presences = state[uid];
+            if (presences && presences.length > 0) {
+              const latest = presences[presences.length - 1];
+              if (latest?.online_at) {
+                next[uid] = latest.online_at;
+              }
+            }
+          });
+          return next;
+        });
+      })
+      .on('presence', { event: 'join' }, () => {
+        setOnlinePresenceState(presenceChannel.presenceState());
+      })
+      .on('presence', { event: 'leave' }, () => {
+        setOnlinePresenceState(presenceChannel.presenceState());
       })
       .subscribe(async (status) => {
         if (status === 'SUBSCRIBED') {
-          await presenceChannel.track({ online_at: new Date().toISOString() });
+          updatePresence();
         }
       });
 
+    const handleVisibility = () => updatePresence();
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    const heartbeatInterval = setInterval(() => {
+      if (presenceChannel && document.visibilityState === 'visible') {
+        presenceChannel.track({
+          online_at: new Date().toISOString(),
+          isOnline: true,
+        });
+      }
+    }, 8000);
+
     return () => {
+      clearInterval(heartbeatInterval);
+      document.removeEventListener('visibilitychange', handleVisibility);
       presenceChannel.unsubscribe();
     };
   }, [profile?.id]);
+
+  const getUserStatusType = (userId) => {
+    if (userId === profile?.id) return 'online';
+    const userPresences = onlinePresenceState[userId];
+    if (!userPresences || userPresences.length === 0) return 'offline';
+
+    const now = new Date().getTime();
+    const isAnyOnline = userPresences.some((p) => {
+      if (!p.isOnline) return false;
+      if (!p.online_at) return true;
+      const age = now - new Date(p.online_at).getTime();
+      return age < 25000;
+    });
+    return isAnyOnline ? 'online' : 'offline';
+  };
 
   useEffect(() => {
     if (!profile?.id) return;
@@ -412,6 +584,9 @@ export default function App() {
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'conversation_members' }, () => {
         fetchConversations(profile.id);
+        if (activeConversationRef.current) {
+          loadActiveMembers(activeConversationRef.current.id);
+        }
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'conversations' }, () => {
         fetchConversations(profile.id);
@@ -433,8 +608,10 @@ export default function App() {
             .single();
 
           if (senderInfo) {
+            const senderName = getDisplayName(senderInfo) || 'Someone';
+            
             setSnapchatBanner({
-              username: senderInfo.username || 'Account deleted',
+              username: senderName,
               avatar_url: senderInfo.avatar_url,
               content: payload.new.content,
               convId: payload.new.conversation_id,
@@ -444,6 +621,13 @@ export default function App() {
             snapchatBannerTimeoutRef.current = setTimeout(() => {
               setSnapchatBanner(null);
             }, 3800);
+
+            if ('Notification' in window && Notification.permission === 'granted' && document.visibilityState !== 'visible') {
+              new Notification(`New message from ${senderName}`, {
+                body: payload.new.content?.startsWith('https://') ? '📷 Photo' : payload.new.content,
+                icon: FAVICON_SVG,
+              });
+            }
           }
 
           if (isMsgInCurrentActiveChat) {
@@ -457,12 +641,18 @@ export default function App() {
         }
         fetchConversations(profile.id);
       })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'conversation_members' }, () => {
+        if (activeConversationRef.current) {
+          loadActiveMembers(activeConversationRef.current.id);
+        }
+        fetchConversations(profile.id);
+      })
       .subscribe();
 
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [profile?.id]);
+  }, [profile?.id, nicknames]);
 
   useEffect(() => {
     if (!profile?.id) return;
@@ -563,6 +753,7 @@ export default function App() {
     if (data) setRequests(data);
   };
 
+  // Optimized fetchConversations (No Request Spam Loop)
   const fetchConversations = async (myId) => {
     const { data: memberRows, error } = await supabase
       .from('conversation_members')
@@ -577,29 +768,36 @@ export default function App() {
     const convIds = memberRows.map((m) => m.conversation_id);
     const { data: convList } = await supabase
       .from('conversations')
-      .select('*, conversation_members(*, profiles(*))')
-      .in('id', convIds)
-      .order('created_at', { ascending: false });
+      .select(`
+        id, is_group, name, avatar_url, created_by, created_at,
+        conversation_members(conversation_id, user_id, hidden_at, last_read_at, profiles(id, username, avatar_url)),
+        messages(id, conversation_id, sender_id, content, created_at)
+      `)
+      .in('id', convIds);
 
     if (convList) {
-      setConversations(convList);
-      convList.forEach(async (c) => {
-        if (activeConversationRef.current?.id === c.id) {
-          setUnreadCounts((prev) => ({ ...prev, [c.id]: 0 }));
-          return;
-        }
+      const sortedConvs = convList.map((c) => {
+        const msgs = c.messages || [];
+        const latestMsgTime = msgs.length > 0 
+          ? Math.max(...msgs.map((m) => new Date(m.created_at).getTime()))
+          : new Date(c.created_at).getTime();
+        return { ...c, latestMsgTime };
+      }).sort((a, b) => b.latestMsgTime - a.latestMsgTime);
 
+      setConversations(sortedConvs);
+
+      const newUnread = {};
+      convList.forEach((c) => {
         const myMem = memberRows.find((m) => m.conversation_id === c.id);
         const lastRead = myMem?.last_read_at || '1970-01-01';
-        const { count } = await supabase
-          .from('messages')
-          .select('id', { count: 'exact', head: true })
-          .eq('conversation_id', c.id)
-          .gt('created_at', lastRead)
-          .neq('sender_id', myId);
-
-        setUnreadCounts((prev) => ({ ...prev, [c.id]: count || 0 }));
+        if (activeConversationRef.current?.id === c.id) {
+          newUnread[c.id] = 0;
+        } else {
+          const unread = (c.messages || []).filter((m) => m.sender_id !== myId && new Date(m.created_at) > new Date(lastRead)).length;
+          newUnread[c.id] = unread;
+        }
       });
+      setUnreadCounts(newUnread);
     }
   };
 
@@ -664,16 +862,45 @@ export default function App() {
 
     setUnreadCounts((prev) => ({ ...prev, [convId]: 0 }));
 
+    setActiveConvMembers((prev) =>
+      prev.map((m) => (m.user_id === profile.id ? { ...m, last_read_at: now } : m))
+    );
+
     await supabase
       .from('conversation_members')
       .update({ last_read_at: now })
       .match({ conversation_id: convId, user_id: profile.id });
+    
+    loadActiveMembers(convId);
+    fetchConversations(profile.id);
   };
 
   const handleSelectConversation = (c) => {
+    if (activeConversation?.id === c.id) return;
     setActiveConversation(c);
     setTypingUsers({});
+    setSelectedMessageIds([]);
+    setMessages(messagesCache[c.id] || []);
     markAsRead(c.id);
+
+    supabase
+      .from('messages')
+      .select('*, profiles(username, avatar_url)')
+      .eq('conversation_id', c.id)
+      .order('created_at', { ascending: false })
+      .range(0, 35)
+      .then(({ data }) => {
+        if (data) {
+          const sorted = data.reverse();
+          const visible = sorted.filter((m) => !m.is_deleted_for_everyone && !m.deleted_for?.includes(profile.id));
+          setMessagesCache((cache) => ({ ...cache, [c.id]: visible }));
+          if (activeConversationRef.current?.id === c.id) {
+            setMessages(visible);
+            setTimeout(() => scrollToBottom('auto'), 20);
+          }
+          fetchActiveConvReactions(visible.map((m) => m.id));
+        }
+      });
   };
 
   const toggleArchiveChat = (convId, e) => {
@@ -832,17 +1059,17 @@ export default function App() {
     const file = e.target.files?.[0];
     if (!file || !activeConversation) return;
     try {
-      const compressedAvatar = await compressImage(file, 400, 400, 0.8);
+      const publicUrl = await uploadMediaToSupabaseStorage(file);
       const { error } = await supabase
         .from('conversations')
-        .update({ avatar_url: compressedAvatar })
+        .update({ avatar_url: publicUrl })
         .eq('id', activeConversation.id);
 
       if (error) throw error;
 
-      setActiveConversation((prev) => ({ ...prev, avatar_url: compressedAvatar }));
+      setActiveConversation((prev) => ({ ...prev, avatar_url: publicUrl }));
       setConversations((prev) =>
-        prev.map((c) => (c.id === activeConversation.id ? { ...c, avatar_url: compressedAvatar } : c))
+        prev.map((c) => (c.id === activeConversation.id ? { ...c, avatar_url: publicUrl } : c))
       );
     } catch (err) {
       alert('Failed to update group picture: ' + err.message);
@@ -874,7 +1101,7 @@ export default function App() {
       .from('conversation_members')
       .select('*, profiles(*)')
       .eq('conversation_id', convId);
-    if (data) setActiveConvMembers(data);
+    if (data) setActiveConvMembers([...data]);
   };
 
   const fetchActiveConvReactions = async (msgIds) => {
@@ -884,7 +1111,7 @@ export default function App() {
     }
     const { data } = await supabase
       .from('message_reactions')
-      .select('*, profiles(username)')
+      .select('*, profiles(username, avatar_url)')
       .in('message_id', msgIds);
     if (data) setReactions(data);
   };
@@ -894,34 +1121,6 @@ export default function App() {
 
     loadActiveMembers(activeConversation.id);
     markAsRead(activeConversation.id);
-
-    const loadInitialMessages = async () => {
-      const { data, error, count } = await supabase
-        .from('messages')
-        .select('*, profiles(username, avatar_url)', { count: 'exact' })
-        .eq('conversation_id', activeConversation.id)
-        .order('created_at', { ascending: false })
-        .range(0, 35);
-
-      if (!error && data) {
-        const sorted = data.reverse();
-        const visible = sorted.filter((m) => {
-          if (m.is_deleted_for_everyone) return false;
-          if (m.deleted_for && m.deleted_for.includes(profile.id)) return false;
-          return true;
-        });
-        setMessages(visible);
-        setHasMoreMessages((count || 0) > 35);
-        fetchActiveConvReactions(visible.map((m) => m.id));
-
-        setTimeout(() => {
-          if (chatContainerRef.current) {
-            chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
-          }
-        }, 50);
-      }
-    };
-    loadInitialMessages();
 
     const channel = supabase.channel(`chat:${activeConversation.id}`)
       .on(
@@ -943,10 +1142,13 @@ export default function App() {
                 if (existingOptIndex !== -1) {
                   const copy = [...prev];
                   copy[existingOptIndex] = { ...payload.new, profiles: senderProfile };
+                  setMessagesCache((cache) => ({ ...cache, [activeConversation.id]: copy }));
                   return copy;
                 }
                 if (prev.some((m) => m.id === payload.new.id)) return prev;
-                return [...prev, { ...payload.new, profiles: senderProfile }];
+                const updated = [...prev, { ...payload.new, profiles: senderProfile }];
+                setMessagesCache((cache) => ({ ...cache, [activeConversation.id]: updated }));
+                return updated;
               });
 
               if (payload.new.sender_id !== profile.id) {
@@ -957,9 +1159,17 @@ export default function App() {
             }
           } else if (payload.eventType === 'UPDATE') {
             if (payload.new.is_deleted_for_everyone || payload.new.deleted_for?.includes(profile.id)) {
-              setMessages((prev) => prev.filter((m) => m.id !== payload.new.id));
+              setMessages((prev) => {
+                const updated = prev.filter((m) => m.id !== payload.new.id);
+                setMessagesCache((cache) => ({ ...cache, [activeConversation.id]: updated }));
+                return updated;
+              });
             } else {
-              setMessages((prev) => prev.map((m) => (m.id === payload.new.id ? { ...m, ...payload.new } : m)));
+              setMessages((prev) => {
+                const updated = prev.map((m) => (m.id === payload.new.id ? { ...m, ...payload.new } : m));
+                setMessagesCache((cache) => ({ ...cache, [activeConversation.id]: updated }));
+                return updated;
+              });
             }
           }
         }
@@ -1005,7 +1215,11 @@ export default function App() {
         return true;
       });
 
-      setMessages((prev) => [...visibleOlder, ...prev]);
+      setMessages((prev) => {
+        const updated = [...visibleOlder, ...prev];
+        setMessagesCache((cache) => ({ ...cache, [activeConversation.id]: updated }));
+        return updated;
+      });
       setHasMoreMessages(data.length === 30);
       fetchActiveConvReactions(visibleOlder.map((m) => m.id));
 
@@ -1035,7 +1249,7 @@ export default function App() {
         payload: {
           convId: activeConversation.id,
           userId: profile.id,
-          username: profile.username || 'Someone',
+          username: getDisplayName(profile) || 'Someone',
           avatarUrl: profile.avatar_url,
           isTyping: true,
         },
@@ -1052,7 +1266,7 @@ export default function App() {
           payload: {
             convId: activeConversationRef.current.id,
             userId: profile.id,
-            username: profile.username || 'Someone',
+            username: getDisplayName(profile) || 'Someone',
             isTyping: false,
           },
         });
@@ -1090,7 +1304,7 @@ export default function App() {
         payload: {
           convId: activeConversation.id,
           userId: profile.id,
-          username: profile.username || 'Someone',
+          username: getDisplayName(profile) || 'Someone',
           isTyping: false,
         },
       });
@@ -1102,7 +1316,11 @@ export default function App() {
       setNewMessage('');
       setShowComposerEmojiPicker(false);
 
-      setMessages((prev) => prev.map((m) => m.id === msgId ? { ...m, content, edited_at: new Date().toISOString() } : m));
+      setMessages((prev) => {
+        const updated = prev.map((m) => m.id === msgId ? { ...m, content, edited_at: new Date().toISOString() } : m);
+        setMessagesCache((cache) => ({ ...cache, [activeConversation.id]: updated }));
+        return updated;
+      });
 
       await supabase
         .from('messages')
@@ -1135,7 +1353,11 @@ export default function App() {
       profiles: profile,
     };
 
-    setMessages((prev) => [...prev.filter((m) => m.id !== optId), optimisticMsg]);
+    setMessages((prev) => {
+      const updated = [...prev.filter((m) => m.id !== optId), optimisticMsg];
+      setMessagesCache((cache) => ({ ...cache, [activeConversation.id]: updated }));
+      return updated;
+    });
     setSendingStatuses((prev) => ({ ...prev, [optId]: 'sending' }));
     setTimeout(() => scrollToBottom('smooth'), 50);
 
@@ -1154,7 +1376,11 @@ export default function App() {
       if (error) throw error;
 
       if (data) {
-        setMessages((prev) => prev.map((m) => m.id === optId ? data : m));
+        setMessages((prev) => {
+          const updated = prev.map((m) => m.id === optId ? data : m);
+          setMessagesCache((cache) => ({ ...cache, [activeConversation.id]: updated }));
+          return updated;
+        });
         setSendingStatuses((prev) => ({ ...prev, [data.id]: 'sent' }));
         setTimeout(() => {
           setSendingStatuses((prev) => {
@@ -1201,11 +1427,11 @@ export default function App() {
     const file = e.target.files?.[0];
     if (!file || !activeConversation) return;
     try {
-      const base64Image = await compressImage(file, 900, 900, 0.7);
-      setPendingImageUpload({ src: base64Image });
+      const publicUrl = await uploadMediaToSupabaseStorage(file);
+      setPendingImageUpload({ src: publicUrl });
       setIsViewOnceChecked(false);
     } catch {
-      alert('Failed to process image.');
+      alert('Failed to upload image.');
     }
     e.target.value = null;
   };
@@ -1222,12 +1448,34 @@ export default function App() {
   };
 
   const handleOpenViewOnce = async (msg) => {
+    if (msg.sender_id === profile.id) {
+      alert("You cannot view your own sent view-once photo.");
+      return;
+    }
+
+    const viewedByArr = msg.viewed_by || [];
+    if (viewedByArr.includes(profile.id)) {
+      alert('This view-once photo has already been opened and is no longer available.');
+      return;
+    }
+
     setViewOnceViewerData(msg);
+
+    const updatedViewedBy = [...viewedByArr, profile.id];
+    setMessages((prev) => {
+      const updated = prev.map((m) => m.id === msg.id ? { ...m, viewed_by: updatedViewedBy } : m);
+      setMessagesCache((cache) => ({ ...cache, [activeConversation.id]: updated }));
+      return updated;
+    });
+    await supabase
+      .from('messages')
+      .update({ viewed_by: updatedViewedBy })
+      .eq('id', msg.id);
   };
 
   const handleVotePoll = async (msgId, optIndex) => {
     const targetMsg = messages.find((m) => m.id === msgId);
-    if (!targetMsg || !targetMsg.content.startsWith('[POLL]:')) return;
+    if (!targetMsg || !targetMsg.content?.startsWith('[POLL]:')) return;
 
     try {
       const pollData = JSON.parse(targetMsg.content.replace('[POLL]:', ''));
@@ -1244,7 +1492,11 @@ export default function App() {
       pollData.votes = votes;
 
       const newContent = `[POLL]:${JSON.stringify(pollData)}`;
-      setMessages((prev) => prev.map((m) => m.id === msgId ? { ...m, content: newContent } : m));
+      setMessages((prev) => {
+        const updated = prev.map((m) => m.id === msgId ? { ...m, content: newContent } : m);
+        setMessagesCache((cache) => ({ ...cache, [activeConversation.id]: updated }));
+        return updated;
+      });
 
       await supabase
         .from('messages')
@@ -1287,19 +1539,20 @@ export default function App() {
 
       mediaRecorder.onstop = async () => {
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-        const reader = new FileReader();
-        reader.readAsDataURL(audioBlob);
-        reader.onloadend = async () => {
-          const base64Audio = reader.result;
+        const audioFile = new File([audioBlob], 'voice.webm', { type: 'audio/webm' });
+        try {
+          const publicUrl = await uploadMediaToSupabaseStorage(audioFile);
           await supabase.from('messages').insert({
             conversation_id: activeConversation.id,
             sender_id: profile.id,
-            content: `[AUDIO]:${base64Audio}`,
+            content: `[AUDIO]:${publicUrl}`,
             reply_to_id: replyingTo ? replyingTo.id : null,
           });
           setReplyingTo(null);
           setTimeout(() => scrollToBottom('smooth'), 50);
-        };
+        } catch {
+          alert('Failed to upload voice note.');
+        }
         stream.getTracks().forEach((track) => track.stop());
       };
 
@@ -1347,27 +1600,43 @@ export default function App() {
     fetchConversations(profile.id);
   };
 
-  const handleDeleteForMe = async (msg) => {
-    const updatedDeletedFor = [...(msg.deleted_for || []), profile.id];
-    setMessages((prev) => prev.filter((m) => m.id !== msg.id));
-    setSelectedMessageForDelete(null);
-    setMobileContextMenuMsg(null);
+  const handleBatchDeleteForMe = async () => {
+    if (selectedMessageIds.length === 0) return;
+    const targetMsgs = messages.filter(m => selectedMessageIds.includes(m.id));
+    
+    setMessages((prev) => {
+      const updated = prev.filter(m => !selectedMessageIds.includes(m.id));
+      setMessagesCache((cache) => ({ ...cache, [activeConversation.id]: updated }));
+      return updated;
+    });
+    setSelectedMessageIds([]);
 
-    await supabase
-      .from('messages')
-      .update({ deleted_for: updatedDeletedFor })
-      .eq('id', msg.id);
+    for (const msg of targetMsgs) {
+      const updatedDeletedFor = [...(msg.deleted_for || []), profile.id];
+      await supabase.from('messages').update({ deleted_for: updatedDeletedFor }).eq('id', msg.id);
+    }
   };
 
-  const handleDeleteForEveryone = async (msg) => {
-    setMessages((prev) => prev.filter((m) => m.id !== msg.id));
-    setSelectedMessageForDelete(null);
-    setMobileContextMenuMsg(null);
+  const handleBatchDeleteForEveryone = async () => {
+    if (selectedMessageIds.length === 0) return;
+    const targetMsgs = messages.filter(m => selectedMessageIds.includes(m.id));
+    const notMine = targetMsgs.some(m => m.sender_id !== profile.id);
+    if (notMine) {
+      alert('You can only delete your own messages for everyone.');
+      return;
+    }
 
-    await supabase
-      .from('messages')
-      .update({ is_deleted_for_everyone: true })
-      .eq('id', msg.id);
+    setMessages((prev) => {
+      const updated = prev.filter(m => !selectedMessageIds.includes(m.id));
+      setMessagesCache((cache) => ({ ...cache, [activeConversation.id]: updated }));
+      return updated;
+    });
+    const ids = selectedMessageIds;
+    setSelectedMessageIds([]);
+
+    for (const id of ids) {
+      await supabase.from('messages').update({ is_deleted_for_everyone: true }).eq('id', id);
+    }
   };
 
   const handleProfilePhotoUpload = async (e) => {
@@ -1375,13 +1644,13 @@ export default function App() {
     if (!file) return;
     try {
       setSavingSettings(true);
-      const compressedAvatar = await compressImage(file, 300, 300, 0.8);
+      const publicUrl = await uploadMediaToSupabaseStorage(file);
       const { error } = await supabase
         .from('profiles')
-        .update({ avatar_url: compressedAvatar })
+        .update({ avatar_url: publicUrl })
         .eq('id', profile.id);
       if (error) throw error;
-      setProfile((prev) => ({ ...prev, avatar_url: compressedAvatar }));
+      setProfile((prev) => ({ ...prev, avatar_url: publicUrl }));
       setSettingsMsg({ text: 'Profile photo updated!', type: 'success' });
     } catch (err) {
       setSettingsMsg({ text: err.message, type: 'error' });
@@ -1401,8 +1670,8 @@ export default function App() {
     const file = e.target.files?.[0];
     if (!file) return;
     try {
-      const compressedBg = await compressImage(file, 1400, 1400, 0.7);
-      const newConfig = { type: 'image', value: compressedBg };
+      const publicUrl = await uploadMediaToSupabaseStorage(file);
+      const newConfig = { type: 'image', value: publicUrl };
       setChatBg(newConfig);
       localStorage.setItem('chat_wallpaper_config', JSON.stringify(newConfig));
       setSettingsMsg({ text: 'Custom chat background applied!', type: 'success' });
@@ -1599,12 +1868,13 @@ export default function App() {
           </span>
         );
       }
+      const readerNames = readers.map((r) => getDisplayName(r.profiles) || 'Member').join(', ');
       return (
         <span 
           style={{ ...styles.statusMeta, color: '#53bdeb' }} 
-          title={`Seen by: ${readers.map((r) => r.profiles?.username || 'Member').join(', ')}`}>
+          title={`Seen by: ${readerNames}`}>
           <CheckCheck size={14} color="#53bdeb" />
-          <span style={{ color: '#53bdeb' }}>Seen by {readers.length}</span>
+          <span style={{ color: '#53bdeb' }}>Seen by: {readerNames}</span>
         </span>
       );
     } else {
@@ -1634,37 +1904,26 @@ export default function App() {
     const userQuery = aiInput.trim();
     const userMsg = { id: Date.now(), sender: 'user', text: userQuery };
 
-    setAiMessages((prev) => [...prev, userMsg]);
+    const updatedMessages = [...currentAiChat.messages, userMsg];
+    updateActiveChatMessages(updatedMessages);
     setAiInput('');
     setIsAiResponding(true);
 
-    let answerText = "";
+    const answerText = await askAiAssistant(updatedMessages);
 
-    try {
-      const fullPrompt = `${SYSTEM_AI_PROMPT}\n\nUser Question: ${userQuery}`;
-      const response = await fetch(`https://text.pollinations.ai/${encodeURIComponent(fullPrompt)}?model=openai`);
-      
-      if (response.ok) {
-        answerText = await response.text();
-      }
-    } catch (err) {
-      console.error('AI Error:', err);
-    }
-
-    if (!answerText || answerText.length < 2) {
-      answerText = `Hello! I'm your Meta AI assistant. Regarding your question about "${userQuery}": svpp-chat fully supports real-time messaging, group polls, YouTube video embeds, view-once photos, and archive PIN security!`;
-    }
-
-    setAiMessages((prev) => [...prev, { id: Date.now() + 1, sender: 'ai', text: answerText }]);
+    const finalMessages = [...updatedMessages, { id: Date.now() + 1, sender: 'ai', text: answerText }];
+    updateActiveChatMessages(finalMessages);
     setIsAiResponding(false);
     setTimeout(() => {
       aiChatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, 50);
   };
 
-  const renderAvatar = (avatarUrl, fallbackText, size = 44, isSquare = false, isUserOnline = false, extraData = null) => {
+  const renderAvatar = (avatarUrl, fallbackText, size = 44, isSquare = false, statusType = 'offline', extraData = null, isGroupMember = false) => {
     const isDeletedUser = fallbackText === 'Account deleted';
     const displayName = isDeletedUser ? 'Account deleted' : (fallbackText || 'U');
+
+    const statusColor = statusType === 'online' ? '#25d366' : '#ef4444';
 
     return (
       <div 
@@ -1674,7 +1933,7 @@ export default function App() {
             setProfilePreviewTarget({
               avatarUrl,
               username: displayName,
-              isOnline: isUserOnline,
+              statusType,
               ...extraData
             });
           }
@@ -1717,7 +1976,7 @@ export default function App() {
             {isDeletedUser ? '🗑️' : displayName[0].toUpperCase()}
           </div>
         )}
-        {isUserOnline && !isDeletedUser && (
+        {!isDeletedUser && !isGroupMember && (
           <div
             style={{
               position: 'absolute',
@@ -1726,10 +1985,10 @@ export default function App() {
               width: `${Math.max(10, Math.round(size * 0.26))}px`,
               height: `${Math.max(10, Math.round(size * 0.26))}px`,
               borderRadius: '50%',
-              backgroundColor: '#25d366',
+              backgroundColor: statusColor,
               border: '2px solid #ffffff',
             }}
-            title="Online"
+            title={statusType === 'online' ? 'Online' : 'Offline'}
           />
         )}
       </div>
@@ -1829,24 +2088,24 @@ export default function App() {
     : null;
 
   const otherUserId = otherDirectMember?.user_id;
-  const isDirectOtherOnline = otherUserId ? onlineUserIds.has(otherUserId) : false;
+  const otherStatusType = otherUserId ? getUserStatusType(otherUserId) : 'offline';
 
   const directOtherProfile = allUsers.find((u) => u.id === otherUserId) || otherDirectMember?.profiles;
-  const isAccountDeleted = !directOtherProfile || !directOtherProfile.username;
+  const isAccountDeleted = !activeConversation?.is_group && (!directOtherProfile || !directOtherProfile.username);
   const isUnfriended = !activeConversation?.is_group && otherUserId && getRelationStatus(otherUserId) !== 'accepted';
 
   const directChatTitle = isAccountDeleted 
     ? 'Account deleted' 
     : isUnfriended 
       ? 'unfriend' 
-      : directOtherProfile?.username || 'Direct Message';
+      : getDisplayName(directOtherProfile) || 'Direct Message';
 
   const isDirectChatFriend = activeConversation?.is_group 
     ? true 
     : (otherUserId ? getRelationStatus(otherUserId) === 'accepted' : true);
 
   const groupOnlineCount = activeConversation?.is_group
-    ? activeConversation.conversation_members?.filter((m) => m.user_id !== profile?.id && onlineUserIds.has(m.user_id)).length
+    ? activeConversation.conversation_members?.filter((m) => getUserStatusType(m.user_id) === 'online').length
     : 0;
 
   const visibleConversations = conversations.filter((c) => {
@@ -1899,7 +2158,7 @@ export default function App() {
               <span style={{ fontSize: '11px', color: '#00a884', fontWeight: '700' }}>• New Message</span>
             </div>
             <div style={{ fontSize: '12px', color: '#667781', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {snapchatBanner.content.startsWith('[IMAGE]:') || snapchatBanner.content.startsWith('[VIEW-ONCE]:') ? '📷 Photo' : snapchatBanner.content.startsWith('[AUDIO]:') ? '🎤 Voice message' : snapchatBanner.content}
+              {snapchatBanner.content?.startsWith('https://') ? '📷 Photo' : snapchatBanner.content}
             </div>
           </div>
           <button onClick={(e) => { e.stopPropagation(); setSnapchatBanner(null); }} style={styles.snapCloseBtn}>
@@ -1912,9 +2171,9 @@ export default function App() {
       {showSidebar && (
         <aside style={{ ...styles.sidebar, width: isMobile ? '100vw' : '380px', height: '100%' }}>
           <div style={styles.profileSection}>
-            {renderAvatar(profile?.avatar_url, profile?.username || session.user.email, 40, false, true, { isSelf: true })}
+            {renderAvatar(profile?.avatar_url, getDisplayName(profile), 40, false, 'online', { isSelf: true })}
             <div style={styles.profileDetails}>
-              <div style={styles.profileUsername}>{profile?.username || 'User'}</div>
+              <div style={styles.profileUsername}>{getDisplayName(profile) || 'User'}</div>
               <div style={styles.profileEmail}>{session.user.email}</div>
             </div>
             <div style={styles.headerIcons}>
@@ -2017,13 +2276,30 @@ export default function App() {
                         ? 'Account deleted' 
                         : rowIsUnfriended 
                           ? 'unfriend' 
-                          : rowOtherProfile?.username || 'Direct Message';
+                          : getDisplayName(rowOtherProfile) || 'Direct Message';
 
                     const cUserId = rowOtherMember?.user_id;
-                    const isOnline = cUserId && !rowIsDeleted ? onlineUserIds.has(cUserId) : false;
+                    const statusType = cUserId && !rowIsDeleted ? getUserStatusType(cUserId) : 'offline';
                     const isSelected = activeConversation?.id === c.id;
                     const chatUnread = unreadCounts[c.id] || 0;
                     const isTypingNow = convTypingMap[c.id];
+
+                    const latestMsg = c.messages && c.messages.length > 0
+                      ? c.messages.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0]
+                      : null;
+                    const chatTimestamp = formatChatTimestamp(latestMsg?.created_at || c.created_at);
+                    
+                    const subLabel = isTypingNow && !rowIsDeleted 
+                      ? (c.is_group ? `${isTypingNow} is typing...` : 'typing...')
+                      : c.is_group 
+                        ? `${c.conversation_members?.length || 0} members` 
+                        : rowIsDeleted 
+                          ? 'Account removed' 
+                          : rowIsUnfriended 
+                            ? 'Unfriended' 
+                            : statusType === 'online' 
+                              ? '● Online' 
+                              : formatLastSeen(userLastSeen[cUserId]);
 
                     return (
                       <div
@@ -2038,7 +2314,7 @@ export default function App() {
                       >
                         {c.is_group ? (
                           c.avatar_url ? (
-                            renderAvatar(c.avatar_url, c.name, 48, false, false, { isGroup: true, conv: c })
+                            renderAvatar(c.avatar_url, c.name, 48, false, 'online', { isGroup: true, conv: c }, true)
                           ) : (
                             <div 
                               onClick={(e) => {
@@ -2052,32 +2328,25 @@ export default function App() {
                             </div>
                           )
                         ) : (
-                          renderAvatar(rowOtherProfile?.avatar_url, rowTitle, 48, false, isOnline, { userProfile: rowOtherProfile })
+                          renderAvatar(rowOtherProfile?.avatar_url, rowTitle, 48, false, statusType, { userProfile: rowOtherProfile })
                         )}
 
                         <div style={styles.chatRowMeta}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                             <span style={styles.chatRowTitle}>{rowTitle}</span>
+                            <span style={{ fontSize: '11.5px', color: chatUnread > 0 ? '#00a884' : '#667781', fontWeight: chatUnread > 0 ? '700' : '400' }}>
+                              {chatTimestamp}
+                            </span>
+                          </div>
+                          
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '2px' }}>
+                            <span style={{ ...styles.chatRowSub, color: isTypingNow ? '#00a884' : statusType === 'online' ? '#00a884' : '#667781' }}>
+                              {subLabel}
+                            </span>
                             {chatUnread > 0 && (
                               <span style={styles.unreadBadge}>{chatUnread}</span>
                             )}
                           </div>
-                          
-                          <span style={styles.chatRowSub}>
-                            {isTypingNow && !rowIsDeleted ? (
-                              <span style={{ color: '#00a884', fontWeight: '700' }}>
-                                {c.is_group ? `${isTypingNow} is typing...` : 'typing...'}
-                              </span>
-                            ) : c.is_group ? (
-                              'Group chat'
-                            ) : rowIsDeleted ? (
-                              'Account removed'
-                            ) : rowIsUnfriended ? (
-                              'Unfriended'
-                            ) : (
-                              isOnline ? '● Online' : '○ Not online'
-                            )}
-                          </span>
                         </div>
 
                         <div style={{ position: 'relative' }}>
@@ -2121,18 +2390,30 @@ export default function App() {
                   </div>
                 ) : (
                   confirmedFriends.map((u) => {
-                    const isUserOnline = onlineUserIds.has(u.id);
+                    const statusType = getUserStatusType(u.id);
+                    const fname = getDisplayName(u);
                     return (
                       <div key={u.id} style={styles.userRow}>
                         <div style={styles.userRowLeft}>
-                          {renderAvatar(u.avatar_url, u.username || u.email, 40, false, isUserOnline, { userProfile: u })}
+                          {renderAvatar(u.avatar_url, fname, 40, false, statusType, { userProfile: u })}
                           <div>
-                            <div style={styles.userName}>{u.username || 'User'}</div>
-                            <div style={styles.userEmail}>{isUserOnline ? '● Online' : '○ Not online'}</div>
+                            <div style={styles.userName}>{fname}</div>
+                            <div style={styles.userEmail}>{statusType === 'online' ? '● Online' : formatLastSeen(userLastSeen[u.id])}</div>
                           </div>
                         </div>
 
                         <div style={{ display: 'flex', gap: '6px' }}>
+                          <button
+                            onClick={() => {
+                              setNicknameTargetUser(u);
+                              setNicknameInput(nicknames[u.id] || u.username || '');
+                              setShowNicknameModal(true);
+                            }}
+                            style={styles.nicknameBtn}
+                            title="Set Nickname"
+                          >
+                            <Tag size={13} />
+                          </button>
                           <button
                             onClick={() => handleStartDirectChat(u)}
                             style={styles.chatFriendBtn}
@@ -2162,15 +2443,16 @@ export default function App() {
                 ) : (
                   allUsers.map((u) => {
                     const status = getRelationStatus(u.id);
-                    const isUserOnline = onlineUserIds.has(u.id);
+                    const statusType = getUserStatusType(u.id);
+                    const uname = getDisplayName(u);
 
                     return (
                       <div key={u.id} style={styles.userRow}>
                         <div style={styles.userRowLeft}>
-                          {renderAvatar(u.avatar_url, u.username || u.email, 40, false, isUserOnline, { userProfile: u })}
+                          {renderAvatar(u.avatar_url, uname, 40, false, statusType, { userProfile: u })}
                           <div>
-                            <div style={styles.userName}>{u.username || 'User'}</div>
-                            <div style={styles.userEmail}>{isUserOnline ? '● Online' : '○ Not online'}</div>
+                            <div style={styles.userName}>{uname}</div>
+                            <div style={styles.userEmail}>{statusType === 'online' ? '● Online' : formatLastSeen(userLastSeen[u.id])}</div>
                           </div>
                         </div>
 
@@ -2206,20 +2488,23 @@ export default function App() {
                 {requests.length === 0 ? (
                   <div style={styles.emptyListNotice}>No incoming friend requests.</div>
                 ) : (
-                  requests.map((r) => (
-                    <div key={r.id} style={styles.userRow}>
-                      <div style={styles.userRowLeft}>
-                        {renderAvatar(r.sender?.avatar_url, r.sender?.username || r.sender?.email, 40, false, false, { userProfile: r.sender })}
-                        <div>
-                          <div style={styles.userName}>{r.sender?.username || 'User'}</div>
-                          <div style={styles.userEmail}>{r.sender?.email}</div>
+                  requests.map((r) => {
+                    const reqName = getDisplayName(r.sender);
+                    return (
+                      <div key={r.id} style={styles.userRow}>
+                        <div style={styles.userRowLeft}>
+                          {renderAvatar(r.sender?.avatar_url, reqName, 40, false, 'online', { userProfile: r.sender })}
+                          <div>
+                            <div style={styles.userName}>{reqName}</div>
+                            <div style={styles.userEmail}>{r.sender?.email}</div>
+                          </div>
                         </div>
+                        <button onClick={() => acceptRequest(r.id, r.sender_id)} style={styles.acceptBtn}>
+                          Accept
+                        </button>
                       </div>
-                      <button onClick={() => acceptRequest(r.id, r.sender_id)} style={styles.acceptBtn}>
-                        Accept
-                      </button>
-                    </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
             )}
@@ -2260,7 +2545,7 @@ export default function App() {
                   )}
                   {activeConversation.is_group ? (
                     activeConversation.avatar_url ? (
-                      renderAvatar(activeConversation.avatar_url, activeConversation.name, 42, false, false, { isGroup: true, conv: activeConversation })
+                      renderAvatar(activeConversation.avatar_url, activeConversation.name, 42, false, 'online', { isGroup: true, conv: activeConversation }, true)
                     ) : (
                       <div style={styles.groupAvatar}>👥</div>
                     )
@@ -2270,7 +2555,7 @@ export default function App() {
                       directChatTitle,
                       42,
                       false,
-                      isDirectOtherOnline,
+                      otherStatusType,
                       { userProfile: directOtherProfile }
                     )
                   )}
@@ -2282,22 +2567,22 @@ export default function App() {
                     {isCurrentChatTyping && !isAccountDeleted ? (
                       <span style={{ fontSize: '13px', fontWeight: '700', color: '#00a884' }}>
                         {activeConversation.is_group
-                          ? `${typingUserList.map((u) => u.username).join(', ')} is typing...`
+                          ? `${typingUserList.map((u) => getDisplayName(u)).join(', ')} is typing...`
                           : 'typing...'}
                       </span>
                     ) : (
                       <span style={{
                         fontSize: '12px',
                         fontWeight: '500',
-                        color: (activeConversation.is_group ? groupOnlineCount > 0 : (isDirectOtherOnline && !isAccountDeleted)) ? '#00a884' : '#667781',
+                        color: (activeConversation.is_group ? groupOnlineCount > 0 : (otherStatusType !== 'offline' && !isAccountDeleted)) ? '#00a884' : '#667781',
                       }}>
                         {activeConversation.is_group
-                          ? `${activeConvMembers.length} members • ${groupOnlineCount > 0 ? `● ${groupOnlineCount} online` : '○ Not online'}`
+                          ? `${activeConvMembers.length} members • ${groupOnlineCount} online`
                           : isAccountDeleted 
                             ? 'Account removed' 
                             : isUnfriended 
                               ? 'Unfriended' 
-                              : (isDirectOtherOnline ? 'online' : 'offline')}
+                              : (otherStatusType === 'online' ? '● Online' : formatLastSeen(userLastSeen[otherUserId]))}
                       </span>
                     )}
                   </div>
@@ -2324,6 +2609,24 @@ export default function App() {
                     </>
                   )}
 
+                  {!activeConversation.is_group && otherUserId && (
+                    <button
+                      onClick={() => {
+                        const targetUsr = allUsers.find(u => u.id === otherUserId) || directOtherProfile;
+                        if (targetUsr) {
+                          setNicknameTargetUser(targetUsr);
+                          setNicknameInput(nicknames[otherUserId] || targetUsr.username || '');
+                          setShowNicknameModal(true);
+                        }
+                      }}
+                      style={styles.pollHeaderBtn}
+                      title="Set Private Nickname"
+                    >
+                      <Tag size={15} />
+                      {!isMobile && <span>Nickname</span>}
+                    </button>
+                  )}
+
                   <button
                     onClick={handleDeleteChat}
                     style={styles.clearChatBtn}
@@ -2334,6 +2637,39 @@ export default function App() {
                   </button>
                 </div>
               </div>
+
+              {/* Multi-select Batch Delete Action Bar */}
+              {selectedMessageIds.length > 0 && (
+                <div style={styles.batchActionBar}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <button onClick={() => setSelectedMessageIds([])} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#111b21', display: 'flex', alignItems: 'center' }}>
+                      <X size={20} />
+                    </button>
+                    <span style={{ fontWeight: '700', fontSize: '14px', color: '#111b21' }}>
+                      {selectedMessageIds.length} selected
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button
+                      onClick={handleBatchDeleteForMe}
+                      style={styles.batchDeleteBtn}
+                    >
+                      Delete for Me
+                    </button>
+                    {selectedMessageIds.every(id => {
+                      const msg = messages.find(m => m.id === id);
+                      return msg && msg.sender_id === profile.id;
+                    }) && (
+                      <button
+                        onClick={handleBatchDeleteForEveryone}
+                        style={{ ...styles.batchDeleteBtn, backgroundColor: '#dc2626', color: '#ffffff' }}
+                      >
+                        Delete for Everyone
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {/* Messages Container */}
               <div
@@ -2359,304 +2695,356 @@ export default function App() {
                   </div>
                 )}
 
-                {messages.map((m) => {
+                {messages.map((m, mIdx) => {
+                  const isSystem = m.content?.startsWith('[SYSTEM]:');
+                  if (isSystem) {
+                    return (
+                      <div key={m.id} style={styles.chatSystemMessageRow}>
+                        <div style={styles.chatSystemMessageBubble}>
+                          {m.content.replace('[SYSTEM]:', '').trim()}
+                        </div>
+                      </div>
+                    );
+                  }
+
                   const isMe = m.sender_id === profile?.id;
                   const time = new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                  const isImage = m.content?.startsWith('[IMAGE]:');
+                  const isImage = m.content?.startsWith('[IMAGE]:') || (m.content?.startsWith('https://') && !m.content?.startsWith('[AUDIO]:') && !m.content?.startsWith('[POLL]:'));
                   const isViewOnceImg = m.content?.startsWith('[VIEW-ONCE]:');
                   const isAudio = m.content?.startsWith('[AUDIO]:');
                   const isPoll = m.content?.startsWith('[POLL]:');
                   const youtubeId = !isImage && !isViewOnceImg && !isAudio && !isPoll ? extractYouTubeId(m.content) : null;
 
                   const isHovered = hoveredMessageId === m.id;
+                  const isTapped = tappedMessageId === m.id;
+                  const showQuickActions = isHovered || (isMobile && isTapped);
+                  const isSelectedForBatch = selectedMessageIds.includes(m.id);
                   const msgReactions = reactions.filter((r) => r.message_id === m.id);
                   const repliedMsg = m.reply_to_id ? (messages.find((x) => x.id === m.reply_to_id) || m.reply_to) : null;
 
                   const viewedByArr = m.viewed_by || [];
                   const hasAlreadyOpened = viewedByArr.includes(profile.id);
 
+                  const currentDateLabel = getMessageDateLabel(m.created_at);
+                  const prevMessage = mIdx > 0 ? messages[mIdx - 1] : null;
+                  const prevDateLabel = prevMessage ? getMessageDateLabel(prevMessage.created_at) : null;
+                  const showDateHeader = currentDateLabel !== prevDateLabel;
+
+                  const rawContent = m.content || '';
+                  const mediaUrl = isImage ? rawContent.replace('[IMAGE]:', '') : isViewOnceImg ? rawContent.replace('[VIEW-ONCE]:', '') : isAudio ? rawContent.replace('[AUDIO]:', '') : '';
+
                   return (
-                    <div
-                      key={m.id}
-                      onMouseEnter={() => setHoveredMessageId(m.id)}
-                      onMouseLeave={() => {
-                        setHoveredMessageId(null);
-                        if (activeReactionPickerMsgId === m.id) {
-                          setActiveReactionPickerMsgId(null);
-                          setShowExtendedReactions(false);
-                        }
-                      }}
-                      onTouchStart={() => {
-                        touchTimerRef.current = setTimeout(() => {
-                          setMobileContextMenuMsg(m);
-                        }, 500);
-                      }}
-                      onTouchEnd={() => {
-                        if (touchTimerRef.current) clearTimeout(touchTimerRef.current);
-                      }}
-                      style={{
-                        ...styles.messageRow,
-                        justifyContent: isMe ? 'flex-end' : 'flex-start',
-                      }}
-                    >
-                      {!isMe && activeConversation.is_group && (
-                        renderAvatar(m.profiles?.avatar_url, m.profiles?.username, 28, false, false, { userProfile: m.profiles })
+                    <React.Fragment key={m.id}>
+                      {showDateHeader && (
+                        <div style={styles.chatDateDivider}>
+                          <span style={styles.chatDateDividerBadge}>{currentDateLabel}</span>
+                        </div>
                       )}
-                      
-                      <div style={styles.messageBubbleWrapper}>
-                        {activeConversation.is_group && !isMe && (
-                          <div style={styles.bubbleSenderName}>{m.profiles?.username || 'Account deleted'}</div>
+
+                      <div
+                        onMouseEnter={() => setHoveredMessageId(m.id)}
+                        onMouseLeave={() => {
+                          setHoveredMessageId(null);
+                          if (activeReactionPickerMsgId === m.id) {
+                            setActiveReactionPickerMsgId(null);
+                            setShowExtendedReactions(false);
+                          }
+                        }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (selectedMessageIds.length > 0) {
+                            setSelectedMessageIds((prev) => 
+                              prev.includes(m.id) ? prev.filter(id => id !== m.id) : [...prev, m.id]
+                            );
+                          } else if (isMobile) {
+                            setTappedMessageId(tappedMessageId === m.id ? null : m.id);
+                          }
+                        }}
+                        style={{
+                          ...styles.messageRow,
+                          justifyContent: isMe ? 'flex-end' : 'flex-start',
+                          backgroundColor: isSelectedForBatch ? 'rgba(0,168,132,0.12)' : 'transparent',
+                          borderRadius: '8px',
+                          padding: isSelectedForBatch ? '4px' : '0'
+                        }}
+                      >
+                        {!isMe && activeConversation.is_group && (
+                          renderAvatar(m.profiles?.avatar_url, m.profiles?.username, 28, false, 'online', { userProfile: m.profiles }, true)
                         )}
+                        
+                        <div style={styles.messageBubbleWrapper}>
+                          {activeConversation.is_group && !isMe && (
+                            <div style={styles.bubbleSenderName}>{getDisplayName(m.profiles) || 'Account deleted'}</div>
+                          )}
 
-                        <div style={{ display: 'flex', alignItems: 'center', position: 'relative', flexDirection: isMe ? 'row-reverse' : 'row' }}>
-                          
-                          <div
-                            style={{
-                              ...styles.bubble,
-                              backgroundColor: isMe ? '#d9fdd3' : '#ffffff',
-                              color: '#111b21',
-                              borderBottomRightRadius: isMe ? '2px' : '8px',
-                              borderBottomLeftRadius: isMe ? '8px' : '2px',
-                              padding: (isImage || isViewOnceImg) ? '4px' : '8px 12px 6px',
-                              minWidth: isPoll ? '260px' : youtubeId ? '240px' : 'auto',
-                            }}
-                          >
-                            {repliedMsg && (
-                              <div style={{
-                                ...styles.replyQuoteBox,
-                                borderLeftColor: isMe ? '#00a884' : '#128c7e',
-                                backgroundColor: isMe ? 'rgba(0,168,132,0.1)' : '#f0f2f5'
-                              }}>
-                                <div style={{ fontSize: '11px', fontWeight: '700', color: isMe ? '#00a884' : '#128c7e' }}>
-                                  {repliedMsg.profiles?.username || 'User'}
-                                </div>
-                                <div style={{ fontSize: '11px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', opacity: 0.85 }}>
-                                  {repliedMsg.content.startsWith('[IMAGE]:') || repliedMsg.content.startsWith('[VIEW-ONCE]:') ? '📷 Photo' : repliedMsg.content.startsWith('[AUDIO]:') ? '🎤 Voice note' : repliedMsg.content}
-                                </div>
-                              </div>
-                            )}
-
-                            {isViewOnceImg ? (
-                              <div 
-                                onClick={() => handleOpenViewOnce(m)}
-                                style={{
-                                  ...styles.viewOnceBubbleCard,
-                                  opacity: hasAlreadyOpened ? 0.6 : 1
-                                }}
-                              >
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                  <div style={{ ...styles.viewOnceIconBadge, backgroundColor: hasAlreadyOpened ? '#94a3b8' : '#ef4444' }}>
-                                    <Flame size={16} color="#ffffff" />
-                                  </div>
-                                  <div>
-                                    <div style={{ fontWeight: '700', fontSize: '13.5px', color: '#111b21' }}>
-                                      {hasAlreadyOpened ? 'Photo Opened' : 'Photo (View Once)'}
-                                    </div>
-                                    <div style={{ fontSize: '11.5px', color: '#667781' }}>
-                                      {hasAlreadyOpened ? 'Expired' : 'Tap to open'}
-                                    </div>
-                                  </div>
-                                </div>
-                              </div>
-                            ) : isImage ? (
-                              <img
-                                src={m.content.replace('[IMAGE]:', '')}
-                                alt="Shared"
-                                onClick={() => setPreviewImage({ src: m.content.replace('[IMAGE]:', ''), title: 'Shared Photo' })}
-                                style={{ maxWidth: '100%', maxHeight: '280px', borderRadius: '8px', display: 'block', cursor: 'pointer' }}
-                              />
-                            ) : isAudio ? (
-                              <audio
-                                controls
-                                src={m.content.replace('[AUDIO]:', '')}
-                                style={{ maxWidth: '240px', height: '36px', outline: 'none' }}
-                              />
-                            ) : isPoll ? (
-                              (() => {
-                                try {
-                                  const pollObj = JSON.parse(m.content.replace('[POLL]:', ''));
-                                  const votes = pollObj.votes || {};
-                                  const totalVotes = Object.values(votes).reduce((acc, vArr) => acc + vArr.length, 0);
-                                  const userVotedIndex = Object.keys(votes).find((idx) => votes[idx]?.includes(profile.id));
-
-                                  return (
-                                    <div style={{ padding: '4px 0' }}>
-                                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: '800', fontSize: '14.5px', color: '#111b21', marginBottom: '8px' }}>
-                                        <BarChart2 size={16} color="#00a884" />
-                                        <span>{pollObj.question}</span>
-                                      </div>
-                                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                                        {pollObj.options.map((opt, oIdx) => {
-                                          const optVoters = votes[oIdx] || [];
-                                          const count = optVoters.length;
-                                          const pct = totalVotes > 0 ? Math.round((count / totalVotes) * 100) : 0;
-                                          const isChosen = userVotedIndex !== undefined && Number(userVotedIndex) === oIdx;
-
-                                          return (
-                                            <div
-                                              key={oIdx}
-                                              onClick={() => {
-                                                if (userVotedIndex === undefined) handleVotePoll(m.id, oIdx);
-                                              }}
-                                              style={{
-                                                ...styles.pollOptionBox,
-                                                borderColor: isChosen ? '#00a884' : '#cbd5e1',
-                                                backgroundColor: isChosen ? '#f0fdf4' : '#ffffff',
-                                                cursor: userVotedIndex === undefined ? 'pointer' : 'default'
-                                              }}
-                                            >
-                                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13.5px', fontWeight: '600', color: '#111b21', zIndex: 2, position: 'relative' }}>
-                                                <span>{opt} {isChosen && '✓'}</span>
-                                                <span style={{ fontSize: '12px', color: '#667781' }}>{count} vote{count !== 1 ? 's' : ''} ({pct}%)</span>
-                                              </div>
-                                              <div style={{ ...styles.pollProgressBar, width: `${pct}%`, backgroundColor: isChosen ? '#dcfce7' : '#f1f5f9' }} />
-                                            </div>
-                                          );
-                                        })}
-                                      </div>
-                                      <div style={{ fontSize: '11px', color: '#667781', marginTop: '6px', textAlign: 'right' }}>
-                                        {totalVotes} total vote{totalVotes !== 1 ? 's' : ''}
-                                      </div>
-                                    </div>
-                                  );
-                                } catch {
-                                  return <div>[Invalid Poll]</div>;
-                                }
-                              })()
-                            ) : youtubeId ? (
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                                <div 
-                                  onClick={() => window.open(`https://www.youtube.com/watch?v=${youtubeId}`, '_blank')}
-                                  style={styles.youtubeCardWrapper}
-                                >
-                                  <div style={{ position: 'relative', width: '100%', height: '140px', backgroundColor: '#000000' }}>
-                                    <img
-                                      src={`https://img.youtube.com/vi/${youtubeId}/hqdefault.jpg`}
-                                      alt="YouTube Thumbnail"
-                                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                                    />
-                                    <div style={styles.youtubePlayOverlay}>
-                                      <Play size={24} color="#ffffff" fill="#ffffff" />
-                                    </div>
-                                  </div>
-                                  <div style={{ padding: '8px 10px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                                    <span style={{ fontSize: '13px', fontWeight: '700', color: '#111b21', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                      YouTube Video • Watch on YouTube
-                                    </span>
-                                    <ExternalLink size={14} color="#54656f" />
-                                  </div>
-                                </div>
-                                <div style={{ fontSize: '14px', wordBreak: 'break-word' }}>{m.content}</div>
-                              </div>
-                            ) : (
-                              <div style={{ fontSize: '14.2px', lineHeight: '19px', wordBreak: 'break-word' }}>{m.content}</div>
-                            )}
-
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '3px', marginTop: '2px' }}>
-                              {m.edited_at && (
-                                <span style={{ fontSize: '9px', fontStyle: 'italic', color: '#667781' }}>edited</span>
-                              )}
-                              <span style={{ fontSize: '10.5px', color: '#667781' }}>{time}</span>
-                              {isMe && renderSeenReceipt(m)}
-                            </div>
-                          </div>
-
-                          <div style={{
-                            ...styles.quickHoverBar,
-                            opacity: isHovered ? 1 : 0,
-                            pointerEvents: isHovered ? 'auto' : 'none',
-                            transform: isHovered ? 'scale(1)' : 'scale(0.92)',
-                            transition: 'opacity 0.08s ease, transform 0.08s ease',
-                            marginInline: '6px'
-                          }}>
-                            <button 
-                              onClick={() => setActiveReactionPickerMsgId(activeReactionPickerMsgId === m.id ? null : m.id)} 
-                              style={styles.quickIconBtn} 
-                              title="React">
-                              <Smile size={14} />
-                            </button>
-
-                            <button 
-                              onClick={() => { setReplyingTo(m); setEditingMessage(null); }} 
-                              style={styles.quickIconBtn} 
-                              title="Reply">
-                              <CornerUpLeft size={14} />
-                            </button>
-
-                            {isMe && !isImage && !isViewOnceImg && !isAudio && !isPoll && (
-                              <button 
-                                onClick={() => { setEditingMessage(m); setNewMessage(m.content); setReplyingTo(null); }} 
-                                style={styles.quickIconBtn} 
-                                title="Edit message">
-                                <Edit2 size={13} />
-                              </button>
-                            )}
-
-                            <button
-                              onClick={() => setSelectedMessageForDelete(m)}
-                              style={styles.quickIconBtn}
-                              title="Delete Options"
+                          <div style={{ display: 'flex', alignItems: 'center', position: 'relative', flexDirection: isMe ? 'row-reverse' : 'row' }}>
+                            
+                            <div
+                              style={{
+                                ...styles.bubble,
+                                backgroundColor: isMe ? '#d9fdd3' : '#ffffff',
+                                color: '#111b21',
+                                borderBottomRightRadius: isMe ? '2px' : '8px',
+                                borderBottomLeftRadius: isMe ? '8px' : '2px',
+                                padding: (isImage || isViewOnceImg) ? '4px' : '8px 12px 6px',
+                                minWidth: isPoll ? '260px' : youtubeId ? '240px' : 'auto',
+                              }}
                             >
-                              <MoreVertical size={14} />
-                            </button>
-                          </div>
-
-                          {activeReactionPickerMsgId === m.id && (
-                            <div style={{ ...styles.whatsappReactionPopup, [isMe ? 'right' : 'left']: 0 }}>
-                              {quickEmojis.map((emoji) => (
-                                <button 
-                                  key={emoji} 
-                                  onClick={() => handleSelectReaction(m.id, emoji)}
-                                  style={styles.reactionEmojiBtn}>
-                                  {emoji}
-                                </button>
-                              ))}
-
-                              <button 
-                                onClick={() => setShowExtendedReactions(!showExtendedReactions)} 
-                                style={styles.reactionEmojiBtn} 
-                                title="More emojis">
-                                <Plus size={14} color="#64748b" />
-                              </button>
-
-                              {showExtendedReactions && (
-                                <div style={styles.extendedReactionGrid}>
-                                  {EMOJI_PALETTE.map((customEmoji) => (
-                                    <span 
-                                      key={customEmoji} 
-                                      onClick={() => handleSelectReaction(m.id, customEmoji)}
-                                      style={styles.gridEmojiSpan}>
-                                      {customEmoji}
-                                    </span>
-                                  ))}
+                              {repliedMsg && (
+                                <div style={{
+                                  ...styles.replyQuoteBox,
+                                  borderLeftColor: isMe ? '#00a884' : '#128c7e',
+                                  backgroundColor: isMe ? 'rgba(0,168,132,0.1)' : '#f0f2f5'
+                                }}>
+                                  <div style={{ fontSize: '11px', fontWeight: '700', color: isMe ? '#00a884' : '#128c7e' }}>
+                                    {getDisplayName(repliedMsg.profiles) || 'User'}
+                                  </div>
+                                  <div style={{ fontSize: '11px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', opacity: 0.85 }}>
+                                    {repliedMsg.content?.startsWith('https://') || repliedMsg.content?.startsWith('[IMAGE]:') || repliedMsg.content?.startsWith('[VIEW-ONCE]:') ? '📷 Photo' : repliedMsg.content?.startsWith('[AUDIO]:') ? '🎤 Voice note' : (repliedMsg.content || '')}
+                                  </div>
                                 </div>
                               )}
+
+                              {isViewOnceImg ? (
+                                <div 
+                                  onClick={() => handleOpenViewOnce(m)}
+                                  style={{
+                                    ...styles.viewOnceBubbleCard,
+                                    opacity: (hasAlreadyOpened || isMe) ? 0.6 : 1,
+                                    cursor: isMe ? 'default' : 'pointer'
+                                  }}
+                                  title={isMe ? "You sent this view-once photo" : "Tap to open"}
+                                >
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    <div style={{ ...styles.viewOnceIconBadge, backgroundColor: (hasAlreadyOpened || isMe) ? '#94a3b8' : '#ef4444' }}>
+                                      <Flame size={16} color="#ffffff" />
+                                    </div>
+                                    <div>
+                                      <div style={{ fontWeight: '700', fontSize: '13.5px', color: '#111b21' }}>
+                                        {isMe ? 'Photo (View Once Sent)' : hasAlreadyOpened ? 'Photo Opened' : 'Photo (View Once)'}
+                                      </div>
+                                      <div style={{ fontSize: '11.5px', color: '#667781' }}>
+                                        {isMe ? 'Cannot be opened' : hasAlreadyOpened ? 'Expired' : 'Tap to open'}
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              ) : isImage ? (
+                                <img
+                                  src={mediaUrl}
+                                  alt="Shared"
+                                  onClick={() => setPreviewImage({ src: mediaUrl, title: 'Shared Photo' })}
+                                  style={{ maxWidth: '100%', maxHeight: '280px', borderRadius: '8px', display: 'block', cursor: 'pointer' }}
+                                />
+                              ) : isAudio ? (
+                                <audio
+                                  controls
+                                  src={mediaUrl}
+                                  style={{ maxWidth: '240px', height: '36px', outline: 'none' }}
+                                />
+                              ) : isPoll ? (
+                                (() => {
+                                  try {
+                                    const pollObj = JSON.parse(m.content.replace('[POLL]:', ''));
+                                    const votes = pollObj.votes || {};
+                                    const totalVotes = Object.values(votes).reduce((acc, vArr) => acc + vArr.length, 0);
+                                    const userVotedIndex = Object.keys(votes).find((idx) => votes[idx]?.includes(profile.id));
+
+                                    return (
+                                      <div style={{ padding: '4px 0' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: '800', fontSize: '14.5px', color: '#111b21', marginBottom: '8px' }}>
+                                          <BarChart2 size={16} color="#00a884" />
+                                          <span>{pollObj.question}</span>
+                                        </div>
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                          {pollObj.options.map((opt, oIdx) => {
+                                            const optVoters = votes[oIdx] || [];
+                                            const count = optVoters.length;
+                                            const pct = totalVotes > 0 ? Math.round((count / totalVotes) * 100) : 0;
+                                            const isChosen = userVotedIndex !== undefined && Number(userVotedIndex) === oIdx;
+
+                                            return (
+                                              <div
+                                                key={oIdx}
+                                                onClick={() => {
+                                                  if (userVotedIndex === undefined) handleVotePoll(m.id, oIdx);
+                                                }}
+                                                style={{
+                                                  ...styles.pollOptionBox,
+                                                  borderColor: isChosen ? '#00a884' : '#cbd5e1',
+                                                  backgroundColor: isChosen ? '#f0fdf4' : '#ffffff',
+                                                  cursor: userVotedIndex === undefined ? 'pointer' : 'default'
+                                                }}
+                                              >
+                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13.5px', fontWeight: '600', color: '#111b21', zIndex: 2, position: 'relative' }}>
+                                                  <span>{opt} {isChosen && '✓'}</span>
+                                                  <span style={{ fontSize: '12px', color: '#667781' }}>{count} vote{count !== 1 ? 's' : ''} ({pct}%)</span>
+                                                </div>
+                                                <div style={{ ...styles.pollProgressBar, width: `${pct}%`, backgroundColor: isChosen ? '#dcfce7' : '#f1f5f9' }} />
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
+                                        <div style={{ fontSize: '11px', color: '#667781', marginTop: '6px', textAlign: 'right' }}>
+                                          {totalVotes} total vote{totalVotes !== 1 ? 's' : ''}
+                                        </div>
+                                      </div>
+                                    );
+                                  } catch {
+                                    return <div>[Invalid Poll]</div>;
+                                  }
+                                })()
+                              ) : youtubeId ? (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                  <div 
+                                    onClick={() => window.open(`https://www.youtube.com/watch?v=${youtubeId}`, '_blank')}
+                                    style={styles.youtubeCardWrapper}
+                                  >
+                                    <div style={{ position: 'relative', width: '100%', height: '140px', backgroundColor: '#000000' }}>
+                                      <img
+                                        src={`https://img.youtube.com/vi/${youtubeId}/hqdefault.jpg`}
+                                        alt="YouTube Thumbnail"
+                                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                      />
+                                      <div style={styles.youtubePlayOverlay}>
+                                        <Play size={24} color="#ffffff" fill="#ffffff" />
+                                      </div>
+                                    </div>
+                                    <div style={{ padding: '8px 10px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                      <span style={{ fontSize: '13px', fontWeight: '700', color: '#111b21', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                        YouTube Video • Watch on YouTube
+                                      </span>
+                                      <ExternalLink size={14} color="#54656f" />
+                                    </div>
+                                  </div>
+                                  <div style={{ fontSize: '14px', wordBreak: 'break-word' }}>{renderMessageTextWithLinks(m.content)}</div>
+                                </div>
+                              ) : (
+                                <div style={{ fontSize: '14.2px', lineHeight: '19px', wordBreak: 'break-word' }}>
+                                  {renderMessageTextWithLinks(m.content)}
+                                </div>
+                              )}
+
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '3px', marginTop: '2px' }}>
+                                {m.edited_at && (
+                                  <span style={{ fontSize: '9px', fontStyle: 'italic', color: '#667781' }}>edited</span>
+                                )}
+                                <span style={{ fontSize: '10.5px', color: '#667781' }}>{time}</span>
+                                {isMe && renderSeenReceipt(m)}
+                              </div>
+                            </div>
+
+                            <div style={{
+                              ...styles.quickHoverBar,
+                              opacity: showQuickActions ? 1 : 0,
+                              pointerEvents: showQuickActions ? 'auto' : 'none',
+                              transform: showQuickActions ? 'scale(1)' : 'scale(0.92)',
+                              transition: 'opacity 0.08s ease, transform 0.08s ease',
+                              marginInline: '6px'
+                            }}>
+                              <button 
+                                onClick={(e) => { e.stopPropagation(); setActiveReactionPickerMsgId(activeReactionPickerMsgId === m.id ? null : m.id); }} 
+                                style={styles.quickIconBtn} 
+                                title="React">
+                                <Smile size={14} />
+                              </button>
+
+                              <button 
+                                onClick={(e) => { e.stopPropagation(); setReplyingTo(m); setEditingMessage(null); }} 
+                                style={styles.quickIconBtn} 
+                                title="Reply">
+                                <CornerUpLeft size={14} />
+                              </button>
+
+                              {isMe && !isImage && !isViewOnceImg && !isAudio && !isPoll && (
+                                <button 
+                                  onClick={(e) => { e.stopPropagation(); setEditingMessage(m); setNewMessage(m.content); setReplyingTo(null); }} 
+                                  style={styles.quickIconBtn} 
+                                  title="Edit message">
+                                  <Edit2 size={13} />
+                                </button>
+                              )}
+
+                              <button
+                                onClick={(e) => { e.stopPropagation(); setSelectedMessageIds([m.id]); }}
+                                style={styles.quickIconBtn}
+                                title="Select to delete"
+                              >
+                                <MoreVertical size={14} />
+                              </button>
+                            </div>
+
+                            {activeReactionPickerMsgId === m.id && (
+                              <div 
+                                style={{ ...styles.whatsappReactionPopup, [isMe ? 'right' : 'left']: 0 }}
+                                onMouseEnter={() => setHoveredMessageId(m.id)}
+                              >
+                                <div style={styles.whatsappReactionInner}>
+                                  {quickEmojis.map((emoji) => (
+                                    <button 
+                                      key={emoji} 
+                                      onClick={() => handleSelectReaction(m.id, emoji)}
+                                      style={styles.reactionEmojiBtn}>
+                                      {emoji}
+                                    </button>
+                                  ))}
+
+                                  <button 
+                                    onClick={() => setShowExtendedReactions(!showExtendedReactions)} 
+                                    style={styles.reactionEmojiBtn} 
+                                    title="More emojis">
+                                    <Plus size={14} color="#64748b" />
+                                  </button>
+                                </div>
+
+                                {showExtendedReactions && (
+                                  <div style={styles.extendedReactionGrid}>
+                                    {EMOJI_PALETTE.map((customEmoji) => (
+                                      <span 
+                                        key={customEmoji} 
+                                        onClick={() => handleSelectReaction(m.id, customEmoji)}
+                                        style={styles.gridEmojiSpan}>
+                                        {customEmoji}
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+
+                          {msgReactions.length > 0 && (
+                            <div style={{ ...styles.reactionBadgeRow, justifyContent: isMe ? 'flex-end' : 'flex-start' }}>
+                              {Array.from(new Set(msgReactions.map((r) => r.emoji))).map((em) => {
+                                const count = msgReactions.filter((r) => r.emoji === em).length;
+                                const hasReacted = msgReactions.some((r) => r.emoji === em && r.user_id === profile.id);
+                                return (
+                                  <span 
+                                    key={em} 
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setReactionDetailsTarget({
+                                        messageId: m.id,
+                                        emoji: em,
+                                        reactors: msgReactions.filter(r => r.emoji === em)
+                                      });
+                                    }}
+                                    style={{
+                                      ...styles.reactionPill,
+                                      borderColor: hasReacted ? '#00a884' : '#e9edef',
+                                      backgroundColor: hasReacted ? '#d9fdd3' : '#ffffff'
+                                    }}
+                                    title="Click to see who reacted"
+                                  >
+                                    {em} {count > 1 ? count : ''}
+                                  </span>
+                                );
+                              })}
                             </div>
                           )}
                         </div>
-
-                        {msgReactions.length > 0 && (
-                          <div style={{ ...styles.reactionBadgeRow, justifyContent: isMe ? 'flex-end' : 'flex-start' }}>
-                            {Array.from(new Set(msgReactions.map((r) => r.emoji))).map((em) => {
-                              const count = msgReactions.filter((r) => r.emoji === em).length;
-                              const hasReacted = msgReactions.some((r) => r.emoji === em && r.user_id === profile.id);
-                              return (
-                                <span 
-                                  key={em} 
-                                  onClick={() => handleSelectReaction(m.id, em)}
-                                  style={{
-                                    ...styles.reactionPill,
-                                    borderColor: hasReacted ? '#00a884' : '#e9edef',
-                                    backgroundColor: hasReacted ? '#d9fdd3' : '#ffffff'
-                                  }}>
-                                  {em} {count > 1 ? count : ''}
-                                </span>
-                              );
-                            })}
-                          </div>
-                        )}
                       </div>
-                    </div>
+                    </React.Fragment>
                   );
                 })}
 
@@ -2679,7 +3067,7 @@ export default function App() {
                       <span className="typing-dot" />
                       {activeConversation.is_group && (
                         <span style={{ fontSize: '11px', color: '#00a884', fontWeight: '700', marginLeft: '6px' }}>
-                          {typingUserList.map((u) => u.username).join(', ')}
+                          {typingUserList.map((u) => getDisplayName(u)).join(', ')}
                         </span>
                       )}
                     </div>
@@ -2698,15 +3086,16 @@ export default function App() {
                 </button>
               )}
 
+              {/* Safe Reply Banner */}
               {replyingTo && (
                 <div style={styles.replyBanner}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden' }}>
                     <CornerUpLeft size={16} color="#00a884" />
                     <span style={{ fontWeight: '700', fontSize: '13px', color: '#00a884' }}>
-                      Replying to {replyingTo.profiles?.username || 'User'}:
+                      Replying to {getDisplayName(replyingTo.profiles) || 'User'}:
                     </span>
                     <span style={{ fontSize: '13px', color: '#667781', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {replyingTo.content.startsWith('[IMAGE]:') || replyingTo.content.startsWith('[VIEW-ONCE]:') ? '📷 Photo' : replyingTo.content.startsWith('[AUDIO]:') ? '🎤 Voice note' : replyingTo.content}
+                      {replyingTo.content?.startsWith('https://') || repliedMsg?.content?.startsWith('[IMAGE]:') || repliedMsg?.content?.startsWith('[VIEW-ONCE]:') ? '📷 Photo' : repliedMsg?.content?.startsWith('[AUDIO]:') ? '🎤 Voice note' : (replyingTo.content || '')}
                     </span>
                   </div>
                   <button onClick={() => setReplyingTo(null)} style={styles.bannerCloseBtn}><X size={15} /></button>
@@ -2741,7 +3130,7 @@ export default function App() {
 
               {/* Composer Input Bar */}
               <div style={styles.inputContainer}>
-                {!isDirectChatFriend || isAccountDeleted ? (
+                {(!activeConversation?.is_group && (!isDirectChatFriend || isAccountDeleted)) ? (
                   <div style={styles.notFriendsGateBanner}>
                     <AlertTriangle size={18} color="#b45309" />
                     <span>{isAccountDeleted ? 'Account deleted' : 'unfriend'}. You can no longer chat with this user!</span>
@@ -2805,6 +3194,7 @@ export default function App() {
                     <button
                       type="button"
                       onClick={(e) => sendMessage(e)}
+                      onTouchEnd={(e) => sendMessage(e)}
                       disabled={!newMessage.trim()}
                       style={{
                         ...styles.sendBtn,
@@ -2830,6 +3220,44 @@ export default function App() {
             </div>
           )}
         </main>
+      )}
+
+      {/* REACTION DETAILS MODAL */}
+      {reactionDetailsTarget && (
+        <div style={styles.modalBackdrop} onClick={() => setReactionDetailsTarget(null)}>
+          <div style={styles.modalBox} onClick={(e) => e.stopPropagation()}>
+            <div style={styles.modalHead}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '22px' }}>{reactionDetailsTarget.emoji}</span>
+                <h4 style={{ margin: 0, fontSize: '17px', color: '#111b21' }}>
+                  Reactions ({reactionDetailsTarget.reactors.length})
+                </h4>
+              </div>
+              <button onClick={() => setReactionDetailsTarget(null)} style={styles.closeBtn}><X size={20} /></button>
+            </div>
+
+            <div style={styles.modalScrollList}>
+              {reactionDetailsTarget.reactors.map((r) => {
+                const reactorName = getDisplayName(r.profiles);
+                return (
+                  <div key={r.id || r.user_id} style={styles.modalFriendRow}>
+                    {renderAvatar(r.profiles?.avatar_url, reactorName, 36, false, 'online', { userProfile: r.profiles })}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: '700', fontSize: '14px', color: '#111b21', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {reactorName} {r.user_id === profile.id ? '(You)' : ''}
+                      </div>
+                    </div>
+                    <span style={{ fontSize: '18px' }}>{r.emoji}</span>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div style={styles.modalActions}>
+              <button onClick={() => setReactionDetailsTarget(null)} style={styles.secondaryBtn}>Close</button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* CREATE POLL MODAL */}
@@ -2881,6 +3309,35 @@ export default function App() {
         </div>
       )}
 
+      {/* NICKNAME MODAL */}
+      {showNicknameModal && nicknameTargetUser && (
+        <div style={styles.modalBackdrop} onClick={() => setShowNicknameModal(false)}>
+          <div style={styles.modalBox} onClick={(e) => e.stopPropagation()}>
+            <div style={styles.modalHead}>
+              <h4 style={{ margin: 0, fontSize: '18px', color: '#111b21' }}>
+                Set Nickname for {nicknameTargetUser.username || 'User'}
+              </h4>
+              <button onClick={() => setShowNicknameModal(false)} style={styles.closeBtn}><X size={20} /></button>
+            </div>
+            <p style={{ fontSize: '13px', color: '#667781', margin: '0 0 12px' }}>
+              This nickname is private and will be visible only to you.
+            </p>
+            <input
+              type="text"
+              placeholder="Enter private nickname..."
+              style={styles.modernInput}
+              value={nicknameInput}
+              onChange={(e) => setNicknameInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') saveNicknameForUser(nicknameTargetUser.id, nicknameInput); }}
+            />
+            <div style={{ display: 'flex', gap: '8px', marginTop: '14px' }}>
+              <button onClick={() => saveNicknameForUser(nicknameTargetUser.id, '')} style={styles.secondaryBtn}>Clear</button>
+              <button onClick={() => saveNicknameForUser(nicknameTargetUser.id, nicknameInput)} style={styles.primaryButton}>Save Nickname</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ARCHIVE PIN MODAL */}
       {showArchiveModal && (
         <div style={styles.modalBackdrop} onClick={() => setShowArchiveModal(false)}>
@@ -2917,10 +3374,10 @@ export default function App() {
                 <div style={styles.modalScrollList}>
                   {archivedConversations.map((c) => {
                     const otherMember = c.conversation_members?.find((m) => m.user_id !== profile?.id)?.profiles;
-                    const title = c.is_group ? c.name : otherMember?.username || 'Account deleted';
+                    const title = c.is_group ? c.name : getDisplayName(otherMember) || 'Account deleted';
                     return (
                       <div key={c.id} style={styles.modalFriendRow}>
-                        {renderAvatar(c.is_group ? c.avatar_url : otherMember?.avatar_url, title, 38, false, false)}
+                        {renderAvatar(c.is_group ? c.avatar_url : otherMember?.avatar_url, title, 38, false, 'offline')}
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ fontWeight: '700', fontSize: '14px', color: '#111b21', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                             {title}
@@ -3005,71 +3462,26 @@ export default function App() {
         </div>
       )}
 
-      {/* MOBILE CONTEXT MENU POPUP */}
-      {mobileContextMenuMsg && (
-        <div style={styles.modalBackdrop} onClick={() => setMobileContextMenuMsg(null)}>
-          <div style={{ ...styles.modalBox, maxWidth: '300px' }} onClick={(e) => e.stopPropagation()}>
-            <div style={styles.modalHead}>
-              <h4 style={{ margin: 0, fontSize: '16px', color: '#111b21' }}>Message Actions</h4>
-              <button onClick={() => setMobileContextMenuMsg(null)} style={styles.closeBtn}><X size={18} /></button>
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '10px' }}>
-              <button
-                onClick={() => {
-                  setReplyingTo(mobileContextMenuMsg);
-                  setEditingMessage(null);
-                  setMobileContextMenuMsg(null);
-                }}
-                style={styles.deleteChoiceBtn}
-              >
-                Reply
-              </button>
-
-              {mobileContextMenuMsg.sender_id === profile.id && !mobileContextMenuMsg.content.startsWith('[IMAGE]:') && !mobileContextMenuMsg.content.startsWith('[VIEW-ONCE]:') && !mobileContextMenuMsg.content.startsWith('[AUDIO]:') && !mobileContextMenuMsg.content.startsWith('[POLL]:') && (
-                <button
-                  onClick={() => {
-                    setEditingMessage(mobileContextMenuMsg);
-                    setNewMessage(mobileContextMenuMsg.content);
-                    setReplyingTo(null);
-                    setMobileContextMenuMsg(null);
-                  }}
-                  style={styles.deleteChoiceBtn}
-                >
-                  Edit Message
-                </button>
-              )}
-
-              {mobileContextMenuMsg.sender_id === profile.id && (
-                <button
-                  onClick={() => handleDeleteForEveryone(mobileContextMenuMsg)}
-                  style={{ ...styles.deleteChoiceBtn, color: '#dc2626', backgroundColor: '#fef2f2', border: '1px solid #fecaca', fontWeight: '700' }}
-                >
-                  Delete for Everyone
-                </button>
-              )}
-
-              <button
-                onClick={() => handleDeleteForMe(mobileContextMenuMsg)}
-                style={styles.deleteChoiceBtn}
-              >
-                Delete for Me
-              </button>
-
-              <button
-                onClick={() => setMobileContextMenuMsg(null)}
-                style={styles.secondaryBtn}
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* META AI ASSISTANT MODAL */}
       {showAiModal && (
-        <div style={styles.lightboxBackdrop} onClick={() => setShowAiModal(false)}>
-          <div style={styles.aiAssistantModalBox} onClick={(e) => e.stopPropagation()}>
+        <div 
+          style={{
+            ...styles.lightboxBackdrop,
+            padding: isMobile ? '0' : '20px'
+          }} 
+          onClick={() => setShowAiModal(false)}
+        >
+          <div 
+            style={{
+              ...styles.aiAssistantModalBox,
+              width: isMobile ? '100vw' : '95%',
+              maxWidth: isMobile ? '100vw' : '720px',
+              height: isMobile ? '100dvh' : '760px',
+              maxHeight: isMobile ? '100dvh' : '88vh',
+              borderRadius: isMobile ? '0' : '20px',
+            }} 
+            onClick={(e) => e.stopPropagation()}
+          >
             <div style={styles.aiModalHeader}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                 <div className="meta-ai-ring" style={{ width: '36px', height: '36px', borderRadius: '50%', padding: '2px' }}>
@@ -3079,11 +3491,32 @@ export default function App() {
                 </div>
                 <div>
                   <div style={{ fontWeight: '800', fontSize: '15px', color: '#111b21' }}>Meta AI Assistant</div>
-                  <div style={{ fontSize: '11px', color: '#00a884' }}>Online • AI Assistant</div>
+                  <div style={{ fontSize: '11px', color: '#00a884' }}>Online • AI Assistant ({currentAiChat.title})</div>
                 </div>
               </div>
               <button onClick={() => setShowAiModal(false)} style={styles.closeBtn}>
                 <X size={20} />
+              </button>
+            </div>
+
+            <div style={styles.aiChatTabsRow}>
+              {aiChats.map(c => (
+                <button
+                  key={c.id}
+                  onClick={() => setActiveAiChatId(c.id)}
+                  style={c.id === activeAiChatId ? styles.aiChatTabActive : styles.aiChatTabBtn}
+                >
+                  {c.title}
+                </button>
+              ))}
+              <button 
+                onClick={() => {
+                  updateActiveChatMessages([{ id: Date.now(), sender: 'ai', text: `Cleared ${currentAiChat.title}. How can I help?` }]);
+                }}
+                style={styles.aiClearChatBtn}
+                title="Clear current chat"
+              >
+                Clear
               </button>
             </div>
 
@@ -3229,7 +3662,7 @@ export default function App() {
               />
               <div style={{ position: 'relative' }}>
                 {activeConversation.avatar_url ? (
-                  renderAvatar(activeConversation.avatar_url, activeConversation.name, 72, false, false, { isGroup: true, conv: activeConversation })
+                  renderAvatar(activeConversation.avatar_url, activeConversation.name, 72, false, 'online', { isGroup: true, conv: activeConversation }, true)
                 ) : (
                   <div style={{ ...styles.groupAvatar, width: '72px', height: '72px', fontSize: '32px' }}>👥</div>
                 )}
@@ -3265,20 +3698,17 @@ export default function App() {
               <div style={styles.modalScrollList}>
                 {activeConvMembers.map((m) => {
                   const isOwner = activeConversation.created_by === m.user_id;
-                  const isOnline = onlineUserIds.has(m.user_id);
                   const isSelf = m.user_id === profile.id;
                   const amIGroupOwner = activeConversation.created_by === profile.id;
+                  const memName = getDisplayName(m.profiles);
 
                   return (
                     <div key={m.user_id} style={styles.modalFriendRow}>
-                      {renderAvatar(m.profiles?.avatar_url, m.profiles?.username || 'M', 38, false, isOnline, { userProfile: m.profiles })}
+                      {renderAvatar(m.profiles?.avatar_url, memName, 38, false, 'online', { userProfile: m.profiles }, true)}
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontWeight: '700', fontSize: '14px', color: '#111b21', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          <span>{m.profiles?.username || 'Member'}</span>
+                          <span>{memName}</span>
                           {isSelf && <span style={{ fontSize: '11px', color: '#667781' }}>(You)</span>}
-                        </div>
-                        <div style={{ fontSize: '12px', color: isOnline ? '#00a884' : '#8696a0' }}>
-                          {isOnline ? '● Online' : '○ Not online'}
                         </div>
                       </div>
 
@@ -3337,20 +3767,23 @@ export default function App() {
                   No accepted friends yet. Head to Explore to add friends first!
                 </div>
               ) : (
-                confirmedFriends.map((f) => (
-                  <div
-                    key={f.id}
-                    onClick={() => handleStartDirectChat(f)}
-                    style={styles.modalFriendRow}
-                  >
-                    {renderAvatar(f.avatar_url, f.username || f.email, 38, false, onlineUserIds.has(f.id), { userProfile: f })}
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontWeight: '700', fontSize: '14px', color: '#111b21' }}>{f.username || 'User'}</div>
-                      <div style={{ fontSize: '12px', color: '#667781' }}>{onlineUserIds.has(f.id) ? '● Online' : '○ Not online'}</div>
+                confirmedFriends.map((f) => {
+                  const fname = getDisplayName(f);
+                  return (
+                    <div
+                      key={f.id}
+                      onClick={() => handleStartDirectChat(f)}
+                      style={styles.modalFriendRow}
+                    >
+                      {renderAvatar(f.avatar_url, fname, 38, false, getUserStatusType(f.id), { userProfile: f })}
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: '700', fontSize: '14px', color: '#111b21' }}>{fname}</div>
+                        <div style={{ fontSize: '12px', color: '#667781' }}>{getUserStatusType(f.id) === 'online' ? '● Online' : formatLastSeen(userLastSeen[f.id])}</div>
+                      </div>
+                      <button style={styles.openChatBtn}>Chat</button>
                     </div>
-                    <button style={styles.openChatBtn}>Chat</button>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
 
@@ -3382,63 +3815,26 @@ export default function App() {
                   All of your friends are already in this group!
                 </div>
               ) : (
-                friendsNotInActiveGroup.map((friend) => (
-                  <div key={friend.id} style={styles.modalFriendRow}>
-                    {renderAvatar(friend.avatar_url, friend.username || friend.email, 38, false, onlineUserIds.has(friend.id), { userProfile: friend })}
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontWeight: '700', fontSize: '14px', color: '#111b21' }}>{friend.username || 'User'}</div>
-                      <div style={{ fontSize: '12px', color: '#667781' }}>{onlineUserIds.has(friend.id) ? '● Online' : '○ Not online'}</div>
+                friendsNotInActiveGroup.map((friend) => {
+                  const frName = getDisplayName(friend);
+                  return (
+                    <div key={friend.id} style={styles.modalFriendRow}>
+                      {renderAvatar(friend.avatar_url, frName, 38, false, getUserStatusType(friend.id), { userProfile: friend })}
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: '700', fontSize: '14px', color: '#111b21' }}>{frName}</div>
+                        <div style={{ fontSize: '12px', color: '#667781' }}>{getUserStatusType(friend.id) === 'online' ? '● Online' : formatLastSeen(userLastSeen[friend.id])}</div>
+                      </div>
+                      <button onClick={() => handleAddMemberToExistingGroup(friend.id)} style={styles.openChatBtn}>
+                        Add
+                      </button>
                     </div>
-                    <button onClick={() => handleAddMemberToExistingGroup(friend.id)} style={styles.openChatBtn}>
-                      Add
-                    </button>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
 
             <div style={styles.modalActions}>
               <button onClick={() => setShowAddMemberModal(false)} style={styles.secondaryBtn}>Close</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {selectedMessageForDelete && (
-        <div style={styles.modalBackdrop}>
-          <div style={{ ...styles.modalBox, maxWidth: '340px' }}>
-            <div style={styles.modalHead}>
-              <h4 style={{ margin: 0, fontSize: '16px' }}>Delete Message?</h4>
-              <button onClick={() => setSelectedMessageForDelete(null)} style={styles.closeBtn}>
-                <X size={18} />
-              </button>
-            </div>
-            <p style={{ fontSize: '13px', color: '#667781', margin: '0 0 14px' }}>
-              Choose how you want to delete this message:
-            </p>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              {selectedMessageForDelete.sender_id === profile.id && (
-                <button
-                  onClick={() => handleDeleteForEveryone(selectedMessageForDelete)}
-                  style={{ ...styles.deleteChoiceBtn, color: '#dc2626', backgroundColor: '#fef2f2', border: '1px solid #fecaca', fontWeight: '700' }}
-                >
-                  <Trash2 size={15} style={{ marginRight: '6px' }} /> Delete for Everyone
-                </button>
-              )}
-
-              <button
-                onClick={() => handleDeleteForMe(selectedMessageForDelete)}
-                style={styles.deleteChoiceBtn}
-              >
-                Delete for Me
-              </button>
-
-              <button
-                onClick={() => setSelectedMessageForDelete(null)}
-                style={styles.secondaryBtn}
-              >
-                Cancel
-              </button>
             </div>
           </div>
         </div>
@@ -3460,19 +3856,22 @@ export default function App() {
             />
             <div style={styles.modalListLabel}>Select Friends:</div>
             <div style={styles.modalScrollList}>
-              {confirmedFriends.map((u) => (
-                <label key={u.id} style={styles.checkboxItem}>
-                  <input
-                    type="checkbox"
-                    checked={selectedGroupUsers.includes(u.id)}
-                    onChange={(e) => {
-                      if (e.target.checked) setSelectedGroupUsers([...selectedGroupUsers, u.id]);
-                      else setSelectedGroupUsers(selectedGroupUsers.filter((id) => id !== u.id));
-                    }}
-                  />
-                  <span style={{ fontSize: '15px' }}>{u.username || u.email}</span>
-                </label>
-              ))}
+              {confirmedFriends.map((u) => {
+                const uname = getDisplayName(u);
+                return (
+                  <label key={u.id} style={styles.checkboxItem}>
+                    <input
+                      type="checkbox"
+                      checked={selectedGroupUsers.includes(u.id)}
+                      onChange={(e) => {
+                        if (e.target.checked) setSelectedGroupUsers([...selectedGroupUsers, u.id]);
+                        else setSelectedGroupUsers(selectedGroupUsers.filter((id) => id !== u.id));
+                      }}
+                    />
+                    <span style={{ fontSize: '15px' }}>{uname}</span>
+                  </label>
+                );
+              })}
             </div>
             <div style={styles.modalActions}>
               <button onClick={() => setShowGroupModal(false)} style={styles.secondaryBtn}>Cancel</button>
@@ -3548,7 +3947,7 @@ export default function App() {
                   onChange={handleProfilePhotoUpload}
                 />
                 <div style={{ position: 'relative' }}>
-                  {renderAvatar(profile?.avatar_url, profile?.username || session.user.email, 80, false, false, { isSelf: true })}
+                  {renderAvatar(profile?.avatar_url, getDisplayName(profile), 80, false, 'online', { isSelf: true })}
                   <button
                     type="button"
                     onClick={() => avatarInputRef.current?.click()}
@@ -3703,7 +4102,7 @@ export default function App() {
                 </div>
 
                 <div style={styles.emailBackupNotice}>
-                  <MailCheck size={16} color="#00a884" style={{ flexShrink: 0, marginTop: '2px' }} />
+                  <MailCheck size={16} color="#00a884" style={{ flexShrink: '0', marginTop: '2px' }} />
                   <span>
                     Credentials updates are mailed directly to <b>{session.user.email}</b>.
                   </span>
@@ -3900,13 +4299,19 @@ const styles = {
   acceptBtn: { padding: '6px 14px', borderRadius: '8px', backgroundColor: '#25d366', color: '#fff', border: 'none', cursor: 'pointer', fontSize: '12px', fontWeight: '700' },
   friendsTag: { fontSize: '12px', color: '#00a884', display: 'flex', alignItems: 'center', gap: '3px', fontWeight: '700' },
   chatFriendBtn: { padding: '6px 12px', borderRadius: '6px', background: '#00a884', color: '#fff', border: 'none', cursor: 'pointer', fontSize: '12px', fontWeight: '700' },
+  nicknameBtn: { padding: '6px 10px', borderRadius: '6px', background: '#f0fdf4', border: '1px solid #bbf7d0', color: '#15803d', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', fontWeight: '700' },
   removeFriendBtn: { padding: '6px 10px', borderRadius: '6px', background: '#fef2f2', border: '1px solid #fee2e2', color: '#dc2626', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', fontWeight: '700' },
 
   metaAiFloatingBtn: { position: 'absolute', right: '16px', bottom: '16px', width: '48px', height: '48px', cursor: 'pointer', zIndex: 40 },
   metaAiGradientRing: { width: '100%', height: '100%', borderRadius: '50%', padding: '2.5px', boxShadow: '0 4px 14px rgba(0,0,0,0.18)' },
   metaAiInnerCircle: { width: '100%', height: '100%', borderRadius: '50%', backgroundColor: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center' },
 
-  aiAssistantModalBox: { width: '92%', maxWidth: '420px', height: '520px', backgroundColor: '#ffffff', borderRadius: '18px', display: 'flex', flexDirection: 'column', boxShadow: '0 12px 36px rgba(0,0,0,0.22)', overflow: 'hidden' },
+  aiAssistantModalBox: { width: '95%', maxWidth: '720px', height: '760px', maxHeight: '88vh', backgroundColor: '#ffffff', borderRadius: '20px', display: 'flex', flexDirection: 'column', boxShadow: '0 16px 48px rgba(0,0,0,0.25)', overflow: 'hidden' },
+  aiChatTabsRow: { display: 'flex', gap: '6px', padding: '8px 16px', backgroundColor: '#f8fafc', borderBottom: '1px solid #e9edef', alignItems: 'center' },
+  aiChatTabBtn: { padding: '6px 14px', fontSize: '12.5px', fontWeight: '600', color: '#54656f', backgroundColor: '#ffffff', border: '1px solid #e9edef', borderRadius: '8px', cursor: 'pointer' },
+  aiChatTabActive: { padding: '6px 14px', fontSize: '12.5px', fontWeight: '700', color: '#00a884', backgroundColor: '#dcfce7', border: '1px solid #bbf7d0', borderRadius: '8px', cursor: 'pointer' },
+  aiClearChatBtn: { marginLeft: 'auto', padding: '5px 10px', fontSize: '11.5px', fontWeight: '600', color: '#dc2626', backgroundColor: '#fef2f2', border: '1px solid #fecaca', borderRadius: '6px', cursor: 'pointer' },
+
   aiModalHeader: { padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f0f2f5', borderBottom: '1px solid #e9edef' },
   aiMessageThread: { flex: 1, overflowY: 'auto', padding: '14px 16px', display: 'flex', flexDirection: 'column' },
   aiBubble: { maxWidth: '82%', padding: '9px 13px', borderRadius: '12px', fontSize: '13.5px', lineHeight: '1.45', wordBreak: 'break-word', boxShadow: '0 1px 0.5px rgba(0,0,0,0.06)' },
@@ -3924,19 +4329,29 @@ const styles = {
   addMemberLinkBtn: { display: 'flex', alignItems: 'center', gap: '4px', background: 'none', border: 'none', color: '#00a884', cursor: 'pointer', fontSize: '12px', fontWeight: '700' },
   clearChatBtn: { display: 'flex', alignItems: 'center', gap: '6px', background: '#fef2f2', border: '1px solid #fecaca', color: '#dc2626', padding: '6px 12px', borderRadius: '8px', cursor: 'pointer', fontSize: '13px', fontWeight: '600' },
 
+  batchActionBar: { position: 'absolute', top: '60px', left: 0, right: 0, backgroundColor: '#ffffff', borderBottom: '1px solid #e9edef', padding: '10px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', zIndex: 25, boxShadow: '0 4px 12px rgba(0,0,0,0.08)' },
+  batchDeleteBtn: { padding: '6px 12px', borderRadius: '8px', backgroundColor: '#fef2f2', border: '1px solid #fecaca', color: '#dc2626', fontWeight: '700', fontSize: '12.5px', cursor: 'pointer' },
+
   messagesContainer: { flex: 1, minHeight: 0, overflowY: 'auto', padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: '4px', position: 'relative' },
   messageRow: { display: 'flex', gap: '8px', width: '100%', margin: '2px 0' },
   messageBubbleWrapper: { display: 'flex', flexDirection: 'column', maxWidth: '75%' },
   bubbleSenderName: { fontSize: '12px', color: '#128c7e', marginBottom: '2px', marginLeft: '4px', fontWeight: '700' },
   bubble: { borderRadius: '8px', fontSize: '14.5px', boxShadow: '0 1px 0.5px rgba(11,20,26,0.13)', position: 'relative' },
   
+  chatSystemMessageRow: { display: 'flex', justifyContent: 'center', margin: '8px 0', width: '100%', zIndex: 2 },
+  chatSystemMessageBubble: { backgroundColor: '#f0f2f5', color: '#54656f', fontSize: '12px', fontWeight: '600', padding: '5px 14px', borderRadius: '10px', textAlign: 'center', maxWidth: '85%', boxShadow: '0 1px 1px rgba(0,0,0,0.05)', border: '1px solid #e9edef' },
+
+  chatDateDivider: { display: 'flex', justifyContent: 'center', margin: '14px 0 10px', width: '100%', zIndex: 2 },
+  chatDateDividerBadge: { backgroundColor: '#e1f3fb', color: '#54656f', fontSize: '11.5px', fontWeight: '700', padding: '5px 12px', borderRadius: '8px', boxShadow: '0 1px 2px rgba(0,0,0,0.08)' },
+
   replyQuoteBox: { borderLeft: '4px solid', padding: '4px 8px', borderRadius: '4px', marginBottom: '4px' },
-  quickHoverBar: { display: 'flex', alignItems: 'center', gap: '2px', backgroundColor: '#ffffff', border: '1px solid #e9edef', borderRadius: '16px', padding: '2px 4px', boxShadow: '0 2px 8px rgba(0,0,0,0.08)' },
+  quickHoverBar: { display: 'flex', alignItems: 'center', gap: '2px', backgroundColor: '#ffffff', border: '1px solid #e9edef', borderRadius: '16px', padding: '2px 6px', boxShadow: '0 2px 8px rgba(0,0,0,0.08)' },
   quickIconBtn: { background: 'transparent', border: 'none', cursor: 'pointer', padding: '4px', borderRadius: '50%', color: '#54656f', display: 'flex', alignItems: 'center', justifyContent: 'center' },
   
-  whatsappReactionPopup: { position: 'absolute', bottom: '100%', marginBottom: '6px', backgroundColor: '#ffffff', borderRadius: '24px', boxShadow: '0 4px 14px rgba(0,0,0,0.15)', display: 'flex', padding: '4px 6px', gap: '3px', zIndex: 30, border: '1px solid #e9edef' },
+  whatsappReactionPopup: { position: 'absolute', bottom: '100%', paddingBottom: '10px', display: 'flex', zIndex: 50 },
+  whatsappReactionInner: { backgroundColor: '#ffffff', borderRadius: '24px', boxShadow: '0 4px 16px rgba(0,0,0,0.18)', display: 'flex', padding: '6px 8px', gap: '4px', border: '1px solid #e9edef' },
   reactionEmojiBtn: { background: 'none', border: 'none', fontSize: '18px', cursor: 'pointer', padding: '2px 5px', borderRadius: '50%' },
-  extendedReactionGrid: { position: 'absolute', bottom: '110%', left: 0, width: '220px', height: '140px', backgroundColor: '#ffffff', borderRadius: '12px', boxShadow: '0 4px 16px rgba(0,0,0,0.18)', display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', overflowY: 'auto', padding: '6px', zIndex: 40, border: '1px solid #e9edef' },
+  extendedReactionGrid: { position: 'absolute', bottom: '110%', left: 0, width: '220px', height: '140px', backgroundColor: '#ffffff', borderRadius: '12px', boxShadow: '0 4px 16px rgba(0,0,0,0.18)', display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', overflowY: 'auto', padding: '6px', zIndex: 60, border: '1px solid #e9edef' },
   gridEmojiSpan: { fontSize: '18px', padding: '4px', textAlign: 'center', cursor: 'pointer' },
 
   reactionBadgeRow: { display: 'flex', gap: '4px', marginTop: '1px', flexWrap: 'wrap' },
@@ -4016,7 +4431,7 @@ const styles = {
   modalListLabel: { fontSize: '13px', color: '#667781', margin: '14px 0 6px', fontWeight: '600' },
   modalScrollList: { maxHeight: '220px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px' },
   modalFriendRow: { display: 'flex', alignItems: 'center', gap: '12px', padding: '8px 10px', borderRadius: '10px', backgroundColor: '#f0f2f5', border: '1px solid #e9edef' },
-  openChatBtn: { padding: '6px 14px', borderRadius: '8px', background: '#00a884', color: '#fff', border: 'none', cursor: 'pointer', fontSize: '12px', fontWeight: '700' },
+  openChatBtn: { padding: '6px 14px', borderRadius: '8px', background: '#00a884', color: '#fff', border: 'none', cursor: 'pointer', fontSize: '12.5px', fontWeight: '700' },
   checkboxItem: { display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', color: '#111b21', cursor: 'pointer' },
   groupOwnerBadge: { display: 'flex', alignItems: 'center', gap: '4px', backgroundColor: '#fef3c7', color: '#b45309', border: '1px solid #fde68a', padding: '3px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: '700' },
   removeMemberBtn: { display: 'flex', alignItems: 'center', gap: '4px', backgroundColor: '#fef2f2', border: '1px solid #fecaca', color: '#dc2626', padding: '4px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: '700', cursor: 'pointer' },
