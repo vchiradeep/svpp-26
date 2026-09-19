@@ -1099,7 +1099,7 @@ export default function App() {
   const loadActiveMembers = async (convId) => {
     const { data } = await supabase
       .from('conversation_members')
-      .select('*, profiles(*)')
+      .select('conversation_id, user_id, hidden_at, last_read_at, profiles(id, username, avatar_url)')
       .eq('conversation_id', convId);
     if (data) setActiveConvMembers([...data]);
   };
