@@ -222,6 +222,9 @@ export default function App() {
   const [convTypingMap, setConvTypingMap] = useState({});
   const [snapchatBanner, setSnapchatBanner] = useState(null);
 
+  // Message dropdown menus state (WhatsApp style)
+  const [openMessageMenuId, setOpenMessageMenuId] = useState(null);
+
   // Forward Modal state
   const [forwardingMessage, setForwardingMessage] = useState(null);
   const [showForwardModal, setShowForwardModal] = useState(false);
@@ -362,6 +365,7 @@ export default function App() {
         setShowPollModal(false);
         setShowForwardModal(false);
         setShowMediaGalleryModal(false);
+        setOpenMessageMenuId(null);
         setProfilePreviewTarget(null);
         setReactionDetailsTarget(null);
         setPendingImageUpload(null);
@@ -417,8 +421,8 @@ export default function App() {
 
   const getDisplayName = (userObj) => {
     if (!userObj) return 'User';
-    if (nicknames[userObj.id]) return nicknames[userObj.id];
-    return userObj.username || userObj.user_metadata?.user_name || userObj.email?.split('@')[0] || 'User';
+    if (userObj.id && nicknames[userObj.id]) return nicknames[userObj.id];
+    return userObj.username || userObj.user_name || userObj.user_metadata?.user_name || userObj.email?.split('@')[0] || 'User';
   };
 
   useEffect(() => {
@@ -552,7 +556,6 @@ export default function App() {
     ]);
   };
 
-  // Presence Heartbeat set to 4 seconds for ultra-fast online detection
   useEffect(() => {
     if (!profile?.id) return;
 
@@ -693,7 +696,7 @@ export default function App() {
 
           const { data: senderInfo } = await supabase
             .from('profiles')
-            .select('username, avatar_url')
+            .select('id, username, avatar_url, user_metadata')
             .eq('id', newMsg.sender_id)
             .single();
 
@@ -712,7 +715,6 @@ export default function App() {
               setSnapchatBanner(null);
             }, 3800);
 
-            // Desktop native push notification
             if ('Notification' in window && Notification.permission === 'granted' && document.visibilityState !== 'visible') {
               new Notification(`New message from ${senderName}`, {
                 body: newMsg.content?.startsWith('https://') ? '📷 Photo' : newMsg.content,
@@ -731,7 +733,6 @@ export default function App() {
           }
         }
 
-        // Instantly reorder chat list
         setConversations((prevConvs) => {
           const targetIndex = prevConvs.findIndex(c => c.id === convId);
           if (targetIndex === -1) {
@@ -992,7 +993,7 @@ export default function App() {
 
     supabase
       .from('messages')
-      .select('*, profiles(id, username, avatar_url), reply_to:messages!reply_to_id(*, profiles(id, username, avatar_url))')
+      .select('*, profiles(id, username, avatar_url, user_metadata), reply_to:messages!reply_to_id(*, profiles(id, username, avatar_url, user_metadata))')
       .eq('conversation_id', c.id)
       .order('created_at', { ascending: false })
       .range(0, 35)
@@ -1206,7 +1207,7 @@ export default function App() {
   const loadActiveMembers = async (convId) => {
     const { data } = await supabase
       .from('conversation_members')
-      .select('conversation_id, user_id, hidden_at, last_read_at, profiles(id, username, avatar_url)')
+      .select('conversation_id, user_id, hidden_at, last_read_at, profiles(id, username, avatar_url, user_metadata)')
       .eq('conversation_id', convId);
     if (data) setActiveConvMembers([...data]);
   };
@@ -1218,7 +1219,7 @@ export default function App() {
     }
     const { data } = await supabase
       .from('message_reactions')
-      .select('*, profiles(username, avatar_url)')
+      .select('*, profiles(id, username, avatar_url, user_metadata)')
       .in('message_id', msgIds);
     if (data) setReactions(data);
   };
@@ -1238,7 +1239,7 @@ export default function App() {
             if (!payload.new.is_deleted_for_everyone && !payload.new.deleted_for?.includes(profile.id)) {
               const { data: senderProfile } = await supabase
                 .from('profiles')
-                .select('username, avatar_url')
+                .select('id, username, avatar_url, user_metadata')
                 .eq('id', payload.new.sender_id)
                 .single();
 
@@ -1308,7 +1309,7 @@ export default function App() {
 
     const { data, error } = await supabase
       .from('messages')
-      .select('*, profiles(id, username, avatar_url), reply_to:messages!reply_to_id(*, profiles(id, username, avatar_url))')
+      .select('*, profiles(id, username, avatar_url, user_metadata), reply_to:messages!reply_to_id(*, profiles(id, username, avatar_url, user_metadata))')
       .eq('conversation_id', activeConversation.id)
       .lt('created_at', oldestMsgCreatedAt)
       .order('created_at', { ascending: false })
@@ -1477,7 +1478,7 @@ export default function App() {
           content,
           reply_to_id: replyId,
         })
-        .select('*, profiles(username, avatar_url), reply_to:messages!reply_to_id(*, profiles(id, username, avatar_url))')
+        .select('*, profiles(id, username, avatar_url, user_metadata), reply_to:messages!reply_to_id(*, profiles(id, username, avatar_url, user_metadata))')
         .single();
 
       if (error) throw error;
@@ -1992,7 +1993,7 @@ export default function App() {
         return (
           <span style={{ ...styles.statusMeta, color: '#53bdeb' }} title={`Seen by: ${readerNames}`}>
             <CheckCheck size={14} color="#53bdeb" />
-            <span style={{ color: '#53bdeb', fontSize: '11px', marginLeft: '2px' }}>Seen by: {readerNames}</span>
+            <span style={{ color: '#53bdeb', fontSize: '11px', marginLeft: '2px' }}>Seen</span>
           </span>
         );
       } else if (deliveredMembers.length > 0) {
@@ -2872,7 +2873,8 @@ export default function App() {
 
                   const isHovered = hoveredMessageId === m.id;
                   const isTapped = tappedMessageId === m.id;
-                  const showQuickActions = isHovered || (isMobile && isTapped);
+                  const showQuickEmoji = isHovered || (isMobile && isTapped);
+                  const isMenuOpen = openMessageMenuId === m.id;
                   const isSelectedForBatch = selectedMessageIds.includes(m.id);
                   const msgReactions = reactions.filter((r) => r.message_id === m.id);
                   const repliedMsg = m.reply_to || (m.reply_to_id ? messages.find((x) => x.id === m.reply_to_id) : null);
@@ -2945,6 +2947,23 @@ export default function App() {
                                 minWidth: isPoll ? '260px' : youtubeId ? '240px' : 'auto',
                               }}
                             >
+                              {/* WhatsApp style hover chevron arrow */}
+                              {isHovered && (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setOpenMessageMenuId(openMessageMenuId === m.id ? null : m.id);
+                                  }}
+                                  style={{
+                                    ...styles.messageChevronBtn,
+                                    [isMe ? 'left' : 'right']: '-22px',
+                                  }}
+                                  title="Message Options"
+                                >
+                                  <ChevronDown size={15} color="#54656f" />
+                                </button>
+                              )}
+
                               {repliedMsg && (
                                 <div style={{
                                   ...styles.replyQuoteBox,
@@ -3093,11 +3112,12 @@ export default function App() {
                               </div>
                             </div>
 
+                            {/* WhatsApp Quick Emoji Hover Bar */}
                             <div style={{
                               ...styles.quickHoverBar,
-                              opacity: showQuickActions ? 1 : 0,
-                              pointerEvents: showQuickActions ? 'auto' : 'none',
-                              transform: showQuickActions ? 'scale(1)' : 'scale(0.92)',
+                              opacity: showQuickEmoji ? 1 : 0,
+                              pointerEvents: showQuickEmoji ? 'auto' : 'none',
+                              transform: showQuickEmoji ? 'scale(1)' : 'scale(0.92)',
                               transition: 'opacity 0.08s ease, transform 0.08s ease',
                               marginInline: '6px'
                             }}>
@@ -3107,38 +3127,39 @@ export default function App() {
                                 title="React">
                                 <Smile size={14} />
                               </button>
-
-                              <button 
-                                onClick={(e) => { e.stopPropagation(); setReplyingTo(m); setEditingMessage(null); }} 
-                                style={styles.quickIconBtn} 
-                                title="Reply">
-                                <CornerUpLeft size={14} />
-                              </button>
-
-                              <button 
-                                onClick={(e) => { e.stopPropagation(); setForwardingMessage(m); setShowForwardModal(true); }} 
-                                style={styles.quickIconBtn} 
-                                title="Forward Message">
-                                <Share2 size={13} />
-                              </button>
-
-                              {isMe && !isImage && !isViewOnceImg && !isAudio && !isPoll && (
-                                <button 
-                                  onClick={(e) => { e.stopPropagation(); setEditingMessage(m); setNewMessage(m.content); setReplyingTo(null); }} 
-                                  style={styles.quickIconBtn} 
-                                  title="Edit message">
-                                  <Edit2 size={13} />
-                                </button>
-                              )}
-
-                              <button
-                                onClick={(e) => { e.stopPropagation(); setSelectedMessageIds([m.id]); }}
-                                style={styles.quickIconBtn}
-                                title="Select to delete"
-                              >
-                                <MoreVertical size={14} />
-                              </button>
                             </div>
+
+                            {/* WhatsApp Vertical Dropdown Menu */}
+                            {isMenuOpen && (
+                              <div style={{ ...styles.whatsappDropdownMenu, [isMe ? 'left' : 'right']: '-140px' }} onClick={(e) => e.stopPropagation()}>
+                                <button
+                                  onClick={() => { setReplyingTo(m); setEditingMessage(null); setOpenMessageMenuId(null); }}
+                                  style={styles.whatsappDropItem}
+                                >
+                                  <CornerUpLeft size={14} /> Reply
+                                </button>
+                                <button
+                                  onClick={() => { setForwardingMessage(m); setShowForwardModal(true); setOpenMessageMenuId(null); }}
+                                  style={styles.whatsappDropItem}
+                                >
+                                  <Share2 size={14} /> Forward
+                                </button>
+                                {isMe && !isImage && !isViewOnceImg && !isAudio && !isPoll && (
+                                  <button
+                                    onClick={() => { setEditingMessage(m); setNewMessage(m.content); setReplyingTo(null); setOpenMessageMenuId(null); }}
+                                    style={styles.whatsappDropItem}
+                                  >
+                                    <Edit2 size={14} /> Edit
+                                  </button>
+                                )}
+                                <button
+                                  onClick={() => { setSelectedMessageIds([m.id]); setOpenMessageMenuId(null); }}
+                                  style={{ ...styles.whatsappDropItem, color: '#dc2626' }}
+                                >
+                                  <Trash2 size={14} /> Delete
+                                </button>
+                              </div>
+                            )}
 
                             {activeReactionPickerMsgId === m.id && (
                               <div 
@@ -4598,6 +4619,10 @@ const styles = {
   chatDateDividerBadge: { backgroundColor: '#e1f3fb', color: '#54656f', fontSize: '11.5px', fontWeight: '700', padding: '5px 12px', borderRadius: '8px', boxShadow: '0 1px 2px rgba(0,0,0,0.08)' },
 
   replyQuoteBox: { borderLeft: '4px solid', padding: '4px 8px', borderRadius: '4px', marginBottom: '4px' },
+  messageChevronBtn: { position: 'absolute', top: '4px', width: '22px', height: '22px', backgroundColor: '#ffffff', border: '1px solid #e9edef', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', zIndex: 15, boxShadow: '0 2px 5px rgba(0,0,0,0.1)' },
+  whatsappDropdownMenu: { position: 'absolute', top: '28px', backgroundColor: '#ffffff', borderRadius: '10px', boxShadow: '0 8px 24px rgba(0,0,0,0.18)', border: '1px solid #e9edef', zIndex: 60, padding: '6px 0', width: '150px', display: 'flex', flexDirection: 'column' },
+  whatsappDropItem: { display: 'flex', alignItems: 'center', gap: '10px', padding: '9px 14px', background: 'none', border: 'none', fontSize: '13.5px', color: '#111b21', fontWeight: '600', cursor: 'pointer', textAlign: 'left', width: '100%' },
+
   quickHoverBar: { display: 'flex', alignItems: 'center', gap: '2px', backgroundColor: '#ffffff', border: '1px solid #e9edef', borderRadius: '16px', padding: '2px 6px', boxShadow: '0 2px 8px rgba(0,0,0,0.08)' },
   quickIconBtn: { background: 'transparent', border: 'none', cursor: 'pointer', padding: '4px', borderRadius: '50%', color: '#54656f', display: 'flex', alignItems: 'center', justifyContent: 'center' },
    
