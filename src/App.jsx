@@ -163,6 +163,27 @@ const getMessagePreviewLabel = (content) => {
   return content || '';
 };
 
+// crypto.randomUUID() only exists in "secure contexts" (HTTPS or
+// localhost) — on a plain-HTTP LAN address (a very common local-dev setup,
+// e.g. testing on a phone via http://192.168.x.x:3000) it's undefined. A
+// naive fallback like a timestamp+random string is NOT a valid UUID, and
+// inserting that into a Postgres `uuid`-typed column (conversations.id)
+// throws "invalid input syntax for type uuid" — silently breaking group/
+// chat creation with no obvious cause. This fallback always produces a
+// properly formatted RFC4122 v4 UUID, so it works everywhere.
+const generateUuidV4 = () => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    try {
+      return crypto.randomUUID();
+    } catch {}
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+};
+
 const formatLastSeen = (isoString) => {
   if (!isoString) return 'offline';
   const diffSecs = Math.floor((new Date() - new Date(isoString)) / 1000);
@@ -1358,10 +1379,7 @@ export default function App() {
       return;
     }
 
-    const newConversationId =
-      (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
-        ? crypto.randomUUID()
-        : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const newConversationId = generateUuidV4();
     const createdAtIso = new Date().toISOString();
 
     const { error: convErr } = await supabase
@@ -1417,10 +1435,7 @@ export default function App() {
     // "you can only see conversations you belong to" SELECT policy blocks
     // the read-back and the whole group creation aborts with nothing
     // visibly created. Supplying our own id sidesteps that entirely.
-    const newConversationId =
-      (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
-        ? crypto.randomUUID()
-        : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const newConversationId = generateUuidV4();
     const nowIso = new Date().toISOString();
 
     const { error: convError } = await supabase
