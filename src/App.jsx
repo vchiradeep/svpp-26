@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from './supabaseClient';
 import emailjs from '@emailjs/browser';
 import { askAiAssistant } from './services/aiService';
+import { fetchUserConversations } from './services/chatService';
 import { 
   MessageSquare, Users, UserPlus, Settings, LogOut, Send, 
   Check, Clock, Plus, KeyRound, Sparkles, X, ChevronLeft, 
@@ -60,7 +61,7 @@ const playPopNotificationSound = () => {
 const uploadMediaToSupabaseStorage = async (file) => {
   const fileExt = file.name.split('.').pop();
   const fileName = `${Math.random().toString(36).substring(2)}_${Date.now()}.${fileExt}`;
-  
+   
   const { error: uploadError } = await supabase.storage
     .from('chat-media')
     .upload(fileName, file);
@@ -203,7 +204,7 @@ export default function App() {
 
   const [activeConversation, setActiveConversation] = useState(null);
   const [activeConvMembers, setActiveConvMembers] = useState([]);
-  
+   
   const [messagesCache, setMessagesCache] = useState({});
   const [messages, setMessages] = useState([]);
   const [selectedMessageIds, setSelectedMessageIds] = useState([]);
@@ -217,7 +218,7 @@ export default function App() {
   const [typingUsers, setTypingUsers] = useState({});
   const [convTypingMap, setConvTypingMap] = useState({});
   const [snapchatBanner, setSnapchatBanner] = useState(null);
-  
+   
   const lastTypingBroadcastTimeRef = useRef(0);
   const typingStopTimerRef = useRef(null);
   const receiverTypingTimersRef = useRef({});
@@ -226,7 +227,7 @@ export default function App() {
   const activeConversationRef = useRef(null);
 
   const [showAiModal, setShowAiModal] = useState(false);
-  
+   
   const [aiChats, setAiChats] = useState(() => {
     try {
       const saved = localStorage.getItem('svpp_ai_chats_data');
@@ -341,7 +342,7 @@ export default function App() {
     try {
       const savedNicks = localStorage.getItem(`svpp_nicknames_${profile.id}`);
       if (savedNicks) setNicknames(JSON.parse(savedNicks));
-      
+       
       if (profile.nicknames_map) {
         setNicknames(prev => ({ ...prev, ...profile.nicknames_map }));
       }
@@ -355,7 +356,7 @@ export default function App() {
     const updated = { ...nicknames, [targetUserId]: nick.trim() };
     if (!nick.trim()) delete updated[targetUserId];
     setNicknames(updated);
-    
+     
     localStorage.setItem(`svpp_nicknames_${profile.id}`, JSON.stringify(updated));
 
     try {
@@ -404,7 +405,7 @@ export default function App() {
       .typing-dot:nth-child(1) { animation-delay: -0.32s; }
       .typing-dot:nth-child(2) { animation-delay: -0.16s; }
       .typing-dot:nth-child(3) { animation-delay: 0s; }
-      
+       
       @keyframes slideDownToast {
         from { transform: translate(-50%, -100%); opacity: 0; }
         to { transform: translate(-50%, 0); opacity: 1; }
@@ -513,7 +514,7 @@ export default function App() {
       .on('presence', { event: 'sync' }, () => {
         const state = presenceChannel.presenceState();
         setOnlinePresenceState(state);
-        
+         
         setUserLastSeen(prev => {
           const next = { ...prev };
           Object.keys(state).forEach(uid => {
@@ -609,7 +610,7 @@ export default function App() {
 
           if (senderInfo) {
             const senderName = getDisplayName(senderInfo) || 'Someone';
-            
+             
             setSnapchatBanner({
               username: senderName,
               avatar_url: senderInfo.avatar_url,
@@ -754,50 +755,41 @@ export default function App() {
   };
 
   const fetchConversations = async (myId) => {
-    const { data: memberRows, error } = await supabase
+    const convList = await fetchUserConversations(myId);
+
+    const { data: memberRows } = await supabase
       .from('conversation_members')
       .select('conversation_id, hidden_at, last_read_at')
       .eq('user_id', myId);
 
-    if (error || !memberRows || memberRows.length === 0) {
+    if (!convList || convList.length === 0) {
       setConversations([]);
+      setUnreadCounts({});
       return;
     }
 
-    const convIds = memberRows.map((m) => m.conversation_id);
-    const { data: convList } = await supabase
-      .from('conversations')
-      .select(`
-        id, is_group, name, avatar_url, created_by, created_at,
-        conversation_members(conversation_id, user_id, hidden_at, last_read_at, profiles(id, username, avatar_url)),
-        messages(id, conversation_id, sender_id, content, created_at)
-      `)
-      .in('id', convIds);
+    const sortedConvs = convList.map((c) => {
+      const msgs = c.messages || [];
+      const latestMsgTime = msgs.length > 0 
+        ? Math.max(...msgs.map((m) => new Date(m.created_at).getTime()))
+        : new Date(c.created_at).getTime();
+      return { ...c, latestMsgTime };
+    }).sort((a, b) => b.latestMsgTime - a.latestMsgTime);
 
-    if (convList) {
-      const sortedConvs = convList.map((c) => {
-        const msgs = c.messages || [];
-        const latestMsgTime = msgs.length > 0 
-          ? Math.max(...msgs.map((m) => new Date(m.created_at).getTime()))
-          : new Date(c.created_at).getTime();
-        return { ...c, latestMsgTime };
-      }).sort((a, b) => b.latestMsgTime - a.latestMsgTime);
+    setConversations(sortedConvs);
 
-      setConversations(sortedConvs);
-
-      const newUnread = {};
-      convList.forEach((c) => {
-        const myMem = memberRows.find((m) => m.conversation_id === c.id);
-        const lastRead = myMem?.last_read_at || '1970-01-01';
-        if (activeConversationRef.current?.id === c.id) {
-          newUnread[c.id] = 0;
-        } else {
-          const unread = (c.messages || []).filter((m) => m.sender_id !== myId && new Date(m.created_at) > new Date(lastRead)).length;
-          newUnread[c.id] = unread;
-        }
-      });
-      setUnreadCounts(newUnread);
-    }
+    const newUnread = {};
+    convList.forEach((c) => {
+      const myMem = (memberRows || []).find((m) => m.conversation_id === c.id);
+      const lastRead = myMem?.last_read_at || '1970-01-01';
+      if (activeConversationRef.current?.id === c.id) {
+        newUnread[c.id] = 0;
+      } else {
+        const unread = (c.messages || []).filter((m) => m.sender_id !== myId && new Date(m.created_at) > new Date(lastRead)).length;
+        newUnread[c.id] = unread;
+      }
+    });
+    setUnreadCounts(newUnread);
   };
 
   const getRelationStatus = (otherUserId) => {
@@ -869,7 +861,7 @@ export default function App() {
       .from('conversation_members')
       .update({ last_read_at: now })
       .match({ conversation_id: convId, user_id: profile.id });
-    
+     
     loadActiveMembers(convId);
     fetchConversations(profile.id);
   };
@@ -1602,7 +1594,7 @@ export default function App() {
   const handleBatchDeleteForMe = async () => {
     if (selectedMessageIds.length === 0) return;
     const targetMsgs = messages.filter(m => selectedMessageIds.includes(m.id));
-    
+     
     setMessages((prev) => {
       const updated = prev.filter(m => !selectedMessageIds.includes(m.id));
       setMessagesCache((cache) => ({ ...cache, [activeConversation.id]: updated }));
@@ -2037,7 +2029,7 @@ export default function App() {
               onChange={(e) => setEmail(e.target.value)}
               required
             />
-            
+             
             <div style={{ position: 'relative', width: '100%' }}>
               <input
                 type={showAuthPassword ? "text" : "password"}
@@ -2132,7 +2124,7 @@ export default function App() {
 
   return (
     <div style={styles.appContainer} onClick={() => setChatDropdownOpenId(null)}>
-      
+       
       {snapchatBanner && (
         <div 
           onClick={() => {
@@ -2287,7 +2279,7 @@ export default function App() {
                       ? c.messages.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0]
                       : null;
                     const chatTimestamp = formatChatTimestamp(latestMsg?.created_at || c.created_at);
-                    
+                     
                     const subLabel = isTypingNow && !rowIsDeleted 
                       ? (c.is_group ? `${isTypingNow} is typing...` : 'typing...')
                       : c.is_group 
@@ -2337,7 +2329,7 @@ export default function App() {
                               {chatTimestamp}
                             </span>
                           </div>
-                          
+                           
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '2px' }}>
                             <span style={{ ...styles.chatRowSub, color: isTypingNow ? '#00a884' : statusType === 'online' ? '#00a884' : '#667781' }}>
                               {subLabel}
@@ -2770,14 +2762,14 @@ export default function App() {
                         {!isMe && activeConversation.is_group && (
                           renderAvatar(m.profiles?.avatar_url, m.profiles?.username, 28, false, 'online', { userProfile: m.profiles }, true)
                         )}
-                        
+                         
                         <div style={styles.messageBubbleWrapper}>
                           {activeConversation.is_group && !isMe && (
                             <div style={styles.bubbleSenderName}>{getDisplayName(m.profiles) || 'Account deleted'}</div>
                           )}
 
                           <div style={{ display: 'flex', alignItems: 'center', position: 'relative', flexDirection: isMe ? 'row-reverse' : 'row' }}>
-                            
+                             
                             <div
                               style={{
                                 ...styles.bubble,
@@ -2820,7 +2812,7 @@ export default function App() {
                                     </div>
                                     <div>
                                       <div style={{ fontWeight: '700', fontSize: '13.5px', color: '#111b21' }}>
-                                        {isMe ? 'Photo (View Once Sent)' : hasAlreadyOpened ? 'Photo Opened' : 'Photo (View Once)'}
+                                        {isMe ? 'Photo (View Once Sent)' : hasAlreadyOpened ? 'Photo Expired' : 'Photo (View Once)'}
                                       </div>
                                       <div style={{ fontSize: '11.5px', color: '#667781' }}>
                                         {isMe ? 'Cannot be opened' : hasAlreadyOpened ? 'Expired' : 'Tap to open'}
@@ -4266,7 +4258,7 @@ const styles = {
   listArea: { flex: 1, overflowY: 'auto', padding: '0', minHeight: 0 },
   newGroupBtn: { width: 'calc(100% - 24px)', boxSizing: 'border-box', margin: '8px 12px 4px', padding: '10px', borderRadius: '10px', backgroundColor: '#ffffff', border: '1px dashed #00a884', color: '#00a884', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', fontSize: '13.5px', fontWeight: '600' },
   startNewChatBtn: { width: 'calc(100% - 24px)', boxSizing: 'border-box', margin: '4px 12px 8px', padding: '10px', borderRadius: '10px', backgroundColor: '#00a884', border: 'none', color: '#ffffff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', fontSize: '13.5px', fontWeight: '700' },
-  
+   
   archiveRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', margin: '0 12px 8px', backgroundColor: '#f0f2f5', borderRadius: '12px', cursor: 'pointer', border: '1px solid #e9edef' },
   archiveCountBadge: { backgroundColor: '#00a884', color: '#fff', fontSize: '11px', fontWeight: '800', borderRadius: '12px', padding: '2px 8px' },
 
@@ -4336,7 +4328,7 @@ const styles = {
   messageBubbleWrapper: { display: 'flex', flexDirection: 'column', maxWidth: '75%' },
   bubbleSenderName: { fontSize: '12px', color: '#128c7e', marginBottom: '2px', marginLeft: '4px', fontWeight: '700' },
   bubble: { borderRadius: '8px', fontSize: '14.5px', boxShadow: '0 1px 0.5px rgba(11,20,26,0.13)', position: 'relative' },
-  
+   
   chatSystemMessageRow: { display: 'flex', justifyContent: 'center', margin: '8px 0', width: '100%', zIndex: 2 },
   chatSystemMessageBubble: { backgroundColor: '#f0f2f5', color: '#54656f', fontSize: '12px', fontWeight: '600', padding: '5px 14px', borderRadius: '10px', textAlign: 'center', maxWidth: '85%', boxShadow: '0 1px 1px rgba(0,0,0,0.05)', border: '1px solid #e9edef' },
 
@@ -4346,7 +4338,7 @@ const styles = {
   replyQuoteBox: { borderLeft: '4px solid', padding: '4px 8px', borderRadius: '4px', marginBottom: '4px' },
   quickHoverBar: { display: 'flex', alignItems: 'center', gap: '2px', backgroundColor: '#ffffff', border: '1px solid #e9edef', borderRadius: '16px', padding: '2px 6px', boxShadow: '0 2px 8px rgba(0,0,0,0.08)' },
   quickIconBtn: { background: 'transparent', border: 'none', cursor: 'pointer', padding: '4px', borderRadius: '50%', color: '#54656f', display: 'flex', alignItems: 'center', justifyContent: 'center' },
-  
+   
   whatsappReactionPopup: { position: 'absolute', bottom: '100%', paddingBottom: '10px', display: 'flex', zIndex: 50 },
   whatsappReactionInner: { backgroundColor: '#ffffff', borderRadius: '24px', boxShadow: '0 4px 16px rgba(0,0,0,0.18)', display: 'flex', padding: '6px 8px', gap: '4px', border: '1px solid #e9edef' },
   reactionEmojiBtn: { background: 'none', border: 'none', fontSize: '18px', cursor: 'pointer', padding: '2px 5px', borderRadius: '50%' },
