@@ -224,6 +224,9 @@ export default function App() {
 
   // Message dropdown menus state (WhatsApp style)
   const [openMessageMenuId, setOpenMessageMenuId] = useState(null);
+  // Tracks whether the currently open message options dropdown should render
+  // above its trigger (when there isn't enough room below in the viewport)
+  const [messageMenuFlipUp, setMessageMenuFlipUp] = useState(false);
 
   // Forward Modal state
   const [forwardingMessage, setForwardingMessage] = useState(null);
@@ -483,6 +486,90 @@ export default function App() {
       .wave-bar:nth-child(3) { animation-delay: 0.4s; }
       .wave-bar:nth-child(4) { animation-delay: 0.6s; }
       .wave-bar:nth-child(5) { animation-delay: 0.8s; }
+
+      /* ---------------------------------------------------------------- */
+      /* Site-wide smoothness pass: hover feedback, transitions, scroll   */
+      /* ---------------------------------------------------------------- */
+
+      /* Chevron / arrow-mark hover: no circle badge, just a clean, smoothly
+         color-shifting + slightly enlarging arrow. Uses currentColor so the
+         SVG stroke animates together with the button's color transition. */
+      .chevron-hover-btn {
+        color: #54656f;
+        transition: color 0.18s ease, transform 0.18s ease, background-color 0.18s ease;
+      }
+      .chevron-hover-btn:hover {
+        color: #00a884;
+        transform: scale(1.18);
+        background-color: rgba(0, 168, 132, 0.08);
+        border-radius: 4px;
+      }
+      .chevron-hover-btn:active {
+        transform: scale(0.96);
+      }
+      .chevron-hover-icon {
+        transition: color 0.18s ease, transform 0.18s ease;
+      }
+
+      /* Universal smooth hover/press feedback for every real <button> in the
+         app. Uses filter/transform instead of background-color so it never
+         fights with each button's own inline background color. */
+      button {
+        transition: filter 0.16s ease, transform 0.12s ease, opacity 0.16s ease, box-shadow 0.16s ease;
+      }
+      button:hover:not(:disabled) {
+        filter: brightness(0.96);
+      }
+      button:active:not(:disabled) {
+        transform: scale(0.97);
+      }
+      button:disabled {
+        cursor: default;
+      }
+
+      /* Helper class for clickable non-button rows/cards (chat rows, user
+         rows, modal rows, emoji tiles, etc.) to get the same smooth,
+         inline-style-safe hover feedback. */
+      .hover-dim {
+        transition: filter 0.16s ease, transform 0.12s ease;
+      }
+      .hover-dim:hover {
+        filter: brightness(0.97);
+      }
+      .hover-dim:active {
+        transform: scale(0.99);
+      }
+
+      /* Smooth scrolling everywhere scrollable, plus a slim, unobtrusive,
+         smoothly-fading custom scrollbar (WebKit browsers). */
+      html {
+        scroll-behavior: smooth;
+      }
+      *::-webkit-scrollbar {
+        width: 7px;
+        height: 7px;
+      }
+      *::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      *::-webkit-scrollbar-thumb {
+        background-color: rgba(0, 0, 0, 0.16);
+        border-radius: 8px;
+        transition: background-color 0.2s ease;
+      }
+      *::-webkit-scrollbar-thumb:hover {
+        background-color: rgba(0, 0, 0, 0.32);
+      }
+
+      /* Smooth open/close animation for dropdown-style floating menus. */
+      @keyframes floatingMenuPop {
+        from { opacity: 0; transform: translateY(-4px) scale(0.96); }
+        to { opacity: 1; transform: translateY(0) scale(1); }
+      }
+      [data-floating-ui="message-options-menu"],
+      [data-floating-ui="chat-dots-menu"] {
+        animation: floatingMenuPop 0.14s ease-out;
+      }
     `;
     document.head.appendChild(styleTag);
     return () => {
@@ -1387,11 +1474,72 @@ export default function App() {
     const { scrollTop, scrollHeight, clientHeight } = chatContainerRef.current;
     const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
     setShowScrollBottomBtn(distanceFromBottom > 160);
+
+    // Any scroll inside the messages list (up or down) should dismiss any
+    // currently open floating menu/popup so it doesn't stay stuck mid-air
+    // over content it no longer points at.
+    if (openMessageMenuId) setOpenMessageMenuId(null);
+    if (activeReactionPickerMsgId) setActiveReactionPickerMsgId(null);
+    if (showExtendedReactions) setShowExtendedReactions(false);
   };
+
+  // Decides whether the WhatsApp-style message options dropdown should open
+  // below (default) or flip above the trigger, based on how much vertical
+  // space is actually available in the viewport at click-time.
+  const handleToggleMessageMenu = (e, msgId) => {
+    e.stopPropagation();
+    const isSameMenuAlreadyOpen = openMessageMenuId === msgId;
+    if (isSameMenuAlreadyOpen) {
+      setOpenMessageMenuId(null);
+      return;
+    }
+    const triggerRect = e.currentTarget.getBoundingClientRect();
+    const estimatedMenuHeight = 190; // approx height of the 4-item dropdown
+    const spaceBelow = window.innerHeight - triggerRect.bottom;
+    const spaceAbove = triggerRect.top;
+    const shouldFlipUp = spaceBelow < estimatedMenuHeight && spaceAbove > spaceBelow;
+    setMessageMenuFlipUp(shouldFlipUp);
+    setOpenMessageMenuId(msgId);
+  };
+
+  // Global outside-click closer for all floating menus/dropdowns/popups in
+  // the app (message options, reaction pickers, chat list dropdown). Runs on
+  // the capture phase so it reliably fires even when a specific element's
+  // own onClick handler calls stopPropagation() for unrelated reasons (e.g.
+  // message selection). Any element that should NOT trigger a close when
+  // clicked (the trigger buttons themselves, and the menu bodies) is tagged
+  // with a data-floating-ui attribute.
+  useEffect(() => {
+    const handleGlobalPointerDownCloseMenus = (e) => {
+      const clickedInsideFloatingUi = e.target?.closest?.('[data-floating-ui]');
+      if (clickedInsideFloatingUi) return;
+      setOpenMessageMenuId(null);
+      setActiveReactionPickerMsgId(null);
+      setShowExtendedReactions(false);
+      setChatDropdownOpenId(null);
+    };
+    document.addEventListener('mousedown', handleGlobalPointerDownCloseMenus, true);
+    document.addEventListener('touchstart', handleGlobalPointerDownCloseMenus, true);
+    return () => {
+      document.removeEventListener('mousedown', handleGlobalPointerDownCloseMenus, true);
+      document.removeEventListener('touchstart', handleGlobalPointerDownCloseMenus, true);
+    };
+  }, []);
 
   const scrollToBottom = (behavior = 'smooth') => {
     if (chatContainerRef.current) {
-      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+      const container = chatContainerRef.current;
+      if (typeof container.scrollTo === 'function') {
+        try {
+          container.scrollTo({ top: container.scrollHeight, behavior });
+          return;
+        } catch {
+          // Some environments (older browsers/test runners) may not support
+          // the options-object form of scrollTo — fall through to the
+          // original, always-safe instant assignment below.
+        }
+      }
+      container.scrollTop = container.scrollHeight;
     }
   };
 
@@ -2447,6 +2595,7 @@ export default function App() {
                     return (
                       <div
                         key={c.id}
+                        className="hover-dim"
                         onClick={() => handleSelectConversation(c)}
                         style={{
                           ...styles.chatRow,
@@ -2494,6 +2643,7 @@ export default function App() {
 
                         <div style={{ position: 'relative' }}>
                           <button
+                            data-floating-ui="chat-dots-trigger"
                             onClick={(e) => {
                               e.stopPropagation();
                               setChatDropdownOpenId(chatDropdownOpenId === c.id ? null : c.id);
@@ -2505,7 +2655,7 @@ export default function App() {
                           </button>
 
                           {chatDropdownOpenId === c.id && (
-                            <div style={styles.chatDropdownMenu}>
+                            <div data-floating-ui="chat-dots-menu" style={styles.chatDropdownMenu}>
                               <button
                                 onClick={(e) => toggleArchiveChat(c.id, e)}
                                 style={styles.dropdownOptionBtn}
@@ -2536,7 +2686,7 @@ export default function App() {
                     const statusType = getUserStatusType(u.id);
                     const fname = getDisplayName(u);
                     return (
-                      <div key={u.id} style={styles.userRow}>
+                      <div key={u.id} className="hover-dim" style={styles.userRow}>
                         <div style={styles.userRowLeft}>
                           {renderAvatar(u.avatar_url, fname, 40, false, statusType, { userProfile: u })}
                           <div>
@@ -2590,7 +2740,7 @@ export default function App() {
                     const uname = getDisplayName(u);
 
                     return (
-                      <div key={u.id} style={styles.userRow}>
+                      <div key={u.id} className="hover-dim" style={styles.userRow}>
                         <div style={styles.userRowLeft}>
                           {renderAvatar(u.avatar_url, uname, 40, false, statusType, { userProfile: u })}
                           <div>
@@ -2634,7 +2784,7 @@ export default function App() {
                   requests.map((r) => {
                     const reqName = getDisplayName(r.sender);
                     return (
-                      <div key={r.id} style={styles.userRow}>
+                      <div key={r.id} className="hover-dim" style={styles.userRow}>
                         <div style={styles.userRowLeft}>
                           {renderAvatar(r.sender?.avatar_url, reqName, 40, false, 'online', { userProfile: r.sender })}
                           <div>
@@ -2950,14 +3100,13 @@ export default function App() {
                               {/* WhatsApp style hover chevron arrow positioned inside top-right */}
                               {isHovered && (
                                 <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setOpenMessageMenuId(openMessageMenuId === m.id ? null : m.id);
-                                  }}
+                                  data-floating-ui="message-chevron-trigger"
+                                  className="chevron-hover-btn"
+                                  onClick={(e) => handleToggleMessageMenu(e, m.id)}
                                   style={styles.messageChevronBtn}
                                   title="Message Options"
                                 >
-                                  <ChevronDown size={14} color="#54656f" />
+                                  <ChevronDown size={15} color="currentColor" className="chevron-hover-icon" />
                                 </button>
                               )}
 
@@ -3119,6 +3268,7 @@ export default function App() {
                               marginInline: '6px'
                             }}>
                               <button 
+                                data-floating-ui="reaction-picker-trigger"
                                 onClick={(e) => { e.stopPropagation(); setActiveReactionPickerMsgId(activeReactionPickerMsgId === m.id ? null : m.id); }} 
                                 style={styles.quickIconBtn} 
                                 title="React">
@@ -3128,7 +3278,17 @@ export default function App() {
 
                             {/* WhatsApp Vertical Dropdown Menu */}
                             {isMenuOpen && (
-                              <div style={{ ...styles.whatsappDropdownMenu, [isMe ? 'left' : 'right']: '-140px' }} onClick={(e) => e.stopPropagation()}>
+                              <div
+                                data-floating-ui="message-options-menu"
+                                style={{
+                                  ...styles.whatsappDropdownMenu,
+                                  [isMe ? 'left' : 'right']: '-140px',
+                                  ...(messageMenuFlipUp
+                                    ? { top: 'auto', bottom: '28px' }
+                                    : { top: '28px', bottom: 'auto' }),
+                                }}
+                                onClick={(e) => e.stopPropagation()}
+                              >
                                 <button
                                   onClick={() => { setReplyingTo(m); setEditingMessage(null); setOpenMessageMenuId(null); }}
                                   style={styles.whatsappDropItem}
@@ -3160,6 +3320,7 @@ export default function App() {
 
                             {activeReactionPickerMsgId === m.id && (
                               <div 
+                                data-floating-ui="reaction-picker-popup"
                                 style={{ ...styles.whatsappReactionPopup, [isMe ? 'right' : 'left']: 0 }}
                               >
                                 <div style={styles.whatsappReactionInner}>
@@ -3186,7 +3347,7 @@ export default function App() {
                                       <span 
                                         key={customEmoji} 
                                         onClick={() => handleSelectReaction(m.id, customEmoji)}
-                                        style={styles.gridEmojiSpan}>
+                                        className="hover-dim" style={styles.gridEmojiSpan}>
                                         {customEmoji}
                                       </span>
                                     ))}
@@ -3204,6 +3365,7 @@ export default function App() {
                                 return (
                                   <span 
                                     key={em} 
+                                    className="hover-dim"
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       setReactionDetailsTarget({
@@ -3304,7 +3466,7 @@ export default function App() {
                     <span 
                       key={emoji} 
                       onClick={() => handleComposerTyping(newMessage + emoji)}
-                      style={styles.gridEmojiSpan}>
+                      className="hover-dim" style={styles.gridEmojiSpan}>
                       {emoji}
                     </span>
                   ))}
@@ -3473,7 +3635,7 @@ export default function App() {
                   <div
                     key={c.id}
                     onClick={() => handleForwardMessageToConv(c.id)}
-                    style={styles.modalFriendRow}
+                    className="hover-dim" style={styles.modalFriendRow}
                   >
                     {renderAvatar(c.is_group ? c.avatar_url : otherMem?.avatar_url, title, 36, false, 'online')}
                     <div style={{ flex: 1, minWidth: 0 }}>
@@ -3511,7 +3673,7 @@ export default function App() {
               {reactionDetailsTarget.reactors.map((r) => {
                 const reactorName = getDisplayName(r.profiles);
                 return (
-                  <div key={r.id || r.user_id} style={styles.modalFriendRow}>
+                  <div key={r.id || r.user_id} className="hover-dim" style={styles.modalFriendRow}>
                     {renderAvatar(r.profiles?.avatar_url, reactorName, 36, false, 'online', { userProfile: r.profiles })}
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontWeight: '700', fontSize: '14px', color: '#111b21', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -3647,7 +3809,7 @@ export default function App() {
                     const otherMember = c.conversation_members?.find((m) => m.user_id !== profile?.id)?.profiles;
                     const title = c.is_group ? c.name : getDisplayName(otherMember) || 'Account deleted';
                     return (
-                      <div key={c.id} style={styles.modalFriendRow}>
+                      <div key={c.id} className="hover-dim" style={styles.modalFriendRow}>
                         {renderAvatar(c.is_group ? c.avatar_url : otherMember?.avatar_url, title, 38, false, 'offline')}
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ fontWeight: '700', fontSize: '14px', color: '#111b21', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -3974,7 +4136,7 @@ export default function App() {
                   const memName = getDisplayName(m.profiles);
 
                   return (
-                    <div key={m.user_id} style={styles.modalFriendRow}>
+                    <div key={m.user_id} className="hover-dim" style={styles.modalFriendRow}>
                       {renderAvatar(m.profiles?.avatar_url, memName, 38, false, 'online', { userProfile: m.profiles }, true)}
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontWeight: '700', fontSize: '14px', color: '#111b21', display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -4044,7 +4206,7 @@ export default function App() {
                     <div
                       key={f.id}
                       onClick={() => handleStartDirectChat(f)}
-                      style={styles.modalFriendRow}
+                      className="hover-dim" style={styles.modalFriendRow}
                     >
                       {renderAvatar(f.avatar_url, fname, 38, false, getUserStatusType(f.id), { userProfile: f })}
                       <div style={{ flex: 1 }}>
@@ -4089,7 +4251,7 @@ export default function App() {
                 friendsNotInActiveGroup.map((friend) => {
                   const frName = getDisplayName(friend);
                   return (
-                    <div key={friend.id} style={styles.modalFriendRow}>
+                    <div key={friend.id} className="hover-dim" style={styles.modalFriendRow}>
                       {renderAvatar(friend.avatar_url, frName, 38, false, getUserStatusType(friend.id), { userProfile: friend })}
                       <div style={{ flex: 1 }}>
                         <div style={{ fontWeight: '700', fontSize: '14px', color: '#111b21' }}>{frName}</div>
@@ -4130,7 +4292,7 @@ export default function App() {
               {confirmedFriends.map((u) => {
                 const uname = getDisplayName(u);
                 return (
-                  <label key={u.id} style={styles.checkboxItem}>
+                  <label key={u.id} className="hover-dim" style={styles.checkboxItem}>
                     <input
                       type="checkbox"
                       checked={selectedGroupUsers.includes(u.id)}
@@ -4535,7 +4697,7 @@ const styles = {
   activeTabBtn: { flex: 1, padding: '9px 4px', backgroundColor: '#ffffff', border: '1px solid #e9edef', color: '#00a884', cursor: 'pointer', fontSize: '12px', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', fontWeight: '700', boxShadow: '0 2px 4px rgba(0,0,0,0.06)' },
   badge: { backgroundColor: '#25d366', color: '#fff', fontSize: '10px', borderRadius: '10px', padding: '1px 5px', fontWeight: 'bold' },
 
-  listArea: { flex: 1, overflowY: 'auto', padding: '0', minHeight: 0 },
+  listArea: { flex: 1, overflowY: 'auto', padding: '0', minHeight: 0, scrollBehavior: 'smooth' },
   newGroupBtn: { width: 'calc(100% - 24px)', boxSizing: 'border-box', margin: '8px 12px 4px', padding: '10px', borderRadius: '10px', backgroundColor: '#ffffff', border: '1px dashed #00a884', color: '#00a884', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', fontSize: '13.5px', fontWeight: '600' },
   startNewChatBtn: { width: 'calc(100% - 24px)', boxSizing: 'border-box', margin: '4px 12px 8px', padding: '10px', borderRadius: '10px', backgroundColor: '#00a884', border: 'none', color: '#ffffff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', fontSize: '13.5px', fontWeight: '700' },
    
@@ -4584,7 +4746,7 @@ const styles = {
   aiClearChatBtn: { marginLeft: 'auto', padding: '5px 10px', fontSize: '11.5px', fontWeight: '600', color: '#dc2626', backgroundColor: '#fef2f2', border: '1px solid #fecaca', borderRadius: '6px', cursor: 'pointer' },
 
   aiModalHeader: { padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f0f2f5', borderBottom: '1px solid #e9edef' },
-  aiMessageThread: { flex: 1, overflowY: 'auto', padding: '14px 16px', display: 'flex', flexDirection: 'column' },
+  aiMessageThread: { flex: 1, overflowY: 'auto', padding: '14px 16px', display: 'flex', flexDirection: 'column', scrollBehavior: 'smooth' },
   aiBubble: { maxWidth: '82%', padding: '9px 13px', borderRadius: '12px', fontSize: '13.5px', lineHeight: '1.45', wordBreak: 'break-word', boxShadow: '0 1px 0.5px rgba(0,0,0,0.06)' },
   aiComposerBar: { padding: '10px 14px', display: 'flex', gap: '8px', backgroundColor: '#f0f2f5', borderTop: '1px solid #e9edef' },
   aiInput: { flex: 1, padding: '10px 14px', borderRadius: '20px', border: '1px solid #e9edef', outline: 'none', fontSize: '13.5px', backgroundColor: '#ffffff' },
@@ -4616,7 +4778,7 @@ const styles = {
   chatDateDividerBadge: { backgroundColor: '#e1f3fb', color: '#54656f', fontSize: '11.5px', fontWeight: '700', padding: '5px 12px', borderRadius: '8px', boxShadow: '0 1px 2px rgba(0,0,0,0.08)' },
 
   replyQuoteBox: { borderLeft: '4px solid', padding: '4px 8px', borderRadius: '4px', marginBottom: '4px' },
-  messageChevronBtn: { position: 'absolute', top: '4px', right: '4px', width: '20px', height: '20px', backgroundColor: 'rgba(0,0,0,0.06)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', zIndex: 15 },
+  messageChevronBtn: { position: 'absolute', top: '2px', right: '2px', width: '22px', height: '22px', backgroundColor: 'transparent', border: 'none', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', zIndex: 15, padding: 0, color: '#54656f' },
   whatsappDropdownMenu: { position: 'absolute', top: '28px', right: '4px', backgroundColor: '#ffffff', borderRadius: '10px', boxShadow: '0 8px 24px rgba(0,0,0,0.18)', border: '1px solid #e9edef', zIndex: 60, padding: '6px 0', width: '150px', display: 'flex', flexDirection: 'column' },
   whatsappDropItem: { display: 'flex', alignItems: 'center', gap: '10px', padding: '9px 14px', background: 'none', border: 'none', fontSize: '13.5px', color: '#111b21', fontWeight: '600', cursor: 'pointer', textAlign: 'left', width: '100%' },
 
@@ -4626,7 +4788,7 @@ const styles = {
   whatsappReactionPopup: { position: 'absolute', bottom: '100%', paddingBottom: '10px', display: 'flex', zIndex: 50 },
   whatsappReactionInner: { backgroundColor: '#ffffff', borderRadius: '24px', boxShadow: '0 4px 16px rgba(0,0,0,0.18)', display: 'flex', padding: '6px 8px', gap: '4px', border: '1px solid #e9edef' },
   reactionEmojiBtn: { background: 'none', border: 'none', fontSize: '18px', cursor: 'pointer', padding: '2px 5px', borderRadius: '50%' },
-  extendedReactionGrid: { position: 'absolute', bottom: '110%', left: 0, width: '220px', height: '140px', backgroundColor: '#ffffff', borderRadius: '12px', boxShadow: '0 4px 16px rgba(0,0,0,0.18)', display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', overflowY: 'auto', padding: '6px', zIndex: 60, border: '1px solid #e9edef' },
+  extendedReactionGrid: { position: 'absolute', bottom: '110%', left: 0, width: '220px', height: '140px', backgroundColor: '#ffffff', borderRadius: '12px', boxShadow: '0 4px 16px rgba(0,0,0,0.18)', display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', overflowY: 'auto', padding: '6px', zIndex: 60, border: '1px solid #e9edef', scrollBehavior: 'smooth' },
   gridEmojiSpan: { fontSize: '18px', padding: '4px', textAlign: 'center', cursor: 'pointer' },
 
   reactionBadgeRow: { display: 'flex', gap: '4px', marginTop: '1px', flexWrap: 'wrap' },
@@ -4649,7 +4811,7 @@ const styles = {
   replyBanner: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 16px', backgroundColor: '#f0f2f5', borderTop: '1px solid #e9edef', borderLeft: '4px solid #00a884', flexShrink: 0 },
   bannerCloseBtn: { background: 'none', border: 'none', cursor: 'pointer', color: '#54656f' },
 
-  composerEmojiDrawer: { position: 'absolute', bottom: '70px', left: '16px', width: '300px', height: '180px', backgroundColor: '#ffffff', borderRadius: '14px', boxShadow: '0 6px 20px rgba(0,0,0,0.15)', display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', overflowY: 'auto', padding: '8px', zIndex: 20, border: '1px solid #e9edef' },
+  composerEmojiDrawer: { position: 'absolute', bottom: '70px', left: '16px', width: '300px', height: '180px', backgroundColor: '#ffffff', borderRadius: '14px', boxShadow: '0 6px 20px rgba(0,0,0,0.15)', display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', overflowY: 'auto', padding: '8px', zIndex: 20, border: '1px solid #e9edef', scrollBehavior: 'smooth' },
 
   inputContainer: { padding: '10px 16px', backgroundColor: '#f0f2f5', borderTop: '1px solid #e9edef', position: 'relative', flexShrink: 0 },
   composerForm: { display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: '#ffffff', borderRadius: '8px', padding: '4px 6px 4px 10px', boxShadow: '0 1px 0.5px rgba(11,20,26,0.08)' },
@@ -4704,7 +4866,7 @@ const styles = {
   resetBtn: { width: '100%', padding: '10px', borderRadius: '10px', backgroundColor: '#f0f2f5', border: '1px solid #e9edef', color: '#475569', fontSize: '13px', fontWeight: '600', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', marginTop: '6px' },
 
   modalListLabel: { fontSize: '13px', color: '#667781', margin: '14px 0 6px', fontWeight: '600' },
-  modalScrollList: { maxHeight: '220px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px' },
+  modalScrollList: { maxHeight: '220px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px', scrollBehavior: 'smooth' },
   modalFriendRow: { display: 'flex', alignItems: 'center', gap: '12px', padding: '8px 10px', borderRadius: '10px', backgroundColor: '#f0f2f5', border: '1px solid #e9edef' },
   openChatBtn: { padding: '6px 14px', borderRadius: '8px', background: '#00a884', color: '#fff', border: 'none', cursor: 'pointer', fontSize: '12.5px', fontWeight: '700' },
   checkboxItem: { display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', color: '#111b21', cursor: 'pointer' },
