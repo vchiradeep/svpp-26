@@ -1358,29 +1358,38 @@ export default function App() {
       return;
     }
 
-    const { data: newConv, error: convErr } = await supabase
-      .from('conversations')
-      .insert({ is_group: false })
-      .select()
-      .single();
+    const newConversationId =
+      (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const createdAtIso = new Date().toISOString();
 
-    if (convErr || !newConv) {
-      alert('Could not start conversation: ' + (convErr?.message || 'Error'));
+    const { error: convErr } = await supabase
+      .from('conversations')
+      .insert({ id: newConversationId, is_group: false, created_at: createdAtIso });
+
+    if (convErr) {
+      alert('Could not start conversation: ' + convErr.message);
       return;
     }
 
     const now = new Date().toISOString();
-    await supabase.from('conversation_members').insert([
-      { conversation_id: newConv.id, user_id: profile.id, hidden_at: null, last_read_at: now },
-      { conversation_id: newConv.id, user_id: friend.id, hidden_at: null, last_read_at: '1970-01-01' }
+    const { error: membersErr } = await supabase.from('conversation_members').insert([
+      { conversation_id: newConversationId, user_id: profile.id, hidden_at: null, last_read_at: now },
+      { conversation_id: newConversationId, user_id: friend.id, hidden_at: null, last_read_at: '1970-01-01' }
     ]);
+    if (membersErr) {
+      alert('Could not start conversation: ' + membersErr.message);
+      return;
+    }
 
     await supabase.from('messages').insert({
-      conversation_id: newConv.id,
+      conversation_id: newConversationId,
       sender_id: isInitialAccept ? friend.id : profile.id,
       content: 'hi',
     });
 
+    const newConv = { id: newConversationId, is_group: false, created_at: createdAtIso };
     const builtConv = {
       ...newConv,
       conversation_members: [
@@ -1399,17 +1408,32 @@ export default function App() {
 
   const createGroupChat = async () => {
     if (!groupName.trim() || selectedGroupUsers.length === 0) return;
-    const { data: conv, error: convError } = await supabase
+
+    // Generate the conversation id ourselves instead of relying on a
+    // select-back after insert. The previous approach (insert then
+    // .select().single()) silently failed under a very common RLS setup:
+    // right after inserting the conversation row, the creator isn't a
+    // member of it yet (that happens in the next step below), so a
+    // "you can only see conversations you belong to" SELECT policy blocks
+    // the read-back and the whole group creation aborts with nothing
+    // visibly created. Supplying our own id sidesteps that entirely.
+    const newConversationId =
+      (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const nowIso = new Date().toISOString();
+
+    const { error: convError } = await supabase
       .from('conversations')
-      .insert({ 
-        is_group: true, 
-        name: groupName.trim(), 
+      .insert({
+        id: newConversationId,
+        is_group: true,
+        name: groupName.trim(),
         created_by: profile.id,
         admin_ids: [profile.id],
         only_admins_can_message: false,
-      })
-      .select()
-      .single();
+        created_at: nowIso,
+      });
 
     if (convError) {
       alert(
@@ -1421,20 +1445,29 @@ export default function App() {
       return;
     }
 
-    if (conv) {
-      const now = new Date().toISOString();
-      const membersToInsert = [profile.id, ...selectedGroupUsers].map((uid) => ({
-        conversation_id: conv.id,
-        user_id: uid,
-        hidden_at: null,
-        last_read_at: uid === profile.id ? now : '1970-01-01',
-      }));
-      await supabase.from('conversation_members').insert(membersToInsert);
-      setShowGroupModal(false);
-      setGroupName('');
-      setSelectedGroupUsers([]);
+    const membersToInsert = [profile.id, ...selectedGroupUsers].map((uid) => ({
+      conversation_id: newConversationId,
+      user_id: uid,
+      hidden_at: null,
+      last_read_at: uid === profile.id ? nowIso : '1970-01-01',
+    }));
+    const { error: memberError } = await supabase.from('conversation_members').insert(membersToInsert);
+
+    if (memberError) {
+      alert(
+        'The group was created, but adding members failed: ' + memberError.message +
+        '\n\nThe group may be empty — please check your conversation_members table/RLS policies.'
+      );
+      // Still refresh so the (possibly memberless) group shows up rather
+      // than silently disappearing from view.
       fetchConversations(profile.id);
+      return;
     }
+
+    setShowGroupModal(false);
+    setGroupName('');
+    setSelectedGroupUsers([]);
+    fetchConversations(profile.id);
   };
 
   // Whether a given user id currently has admin rights in a group — the
