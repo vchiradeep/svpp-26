@@ -884,7 +884,7 @@ export default function App() {
 
     supabase
       .from('messages')
-      .select('*, profiles(username, avatar_url)')
+      .select('id, conversation_id, sender_id, content, reply_to_id, created_at, edited_at, deleted_for, is_deleted_for_everyone, viewed_by, profiles(id, username, avatar_url)')
       .eq('conversation_id', c.id)
       .order('created_at', { ascending: false })
       .range(0, 35)
@@ -1200,7 +1200,7 @@ export default function App() {
 
     const { data, error } = await supabase
       .from('messages')
-      .select('*, profiles(username, avatar_url)')
+      .select('id, conversation_id, sender_id, content, reply_to_id, created_at, edited_at, deleted_for, is_deleted_for_everyone, viewed_by, profiles(id, username, avatar_url)')
       .eq('conversation_id', activeConversation.id)
       .lt('created_at', oldestMsgCreatedAt)
       .order('created_at', { ascending: false })
