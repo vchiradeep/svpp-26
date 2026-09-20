@@ -336,7 +336,7 @@ export default function App() {
   const groupAvatarInputRef = useRef(null);
   const bgImageInputRef = useRef(null);
 
-  // Desktop keyboard shortcuts (WhatsApp Desktop style)
+  // Desktop shortcuts
   useEffect(() => {
     const handleKeyDown = (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'n') {
@@ -409,7 +409,7 @@ export default function App() {
   const getDisplayName = (userObj) => {
     if (!userObj) return 'User';
     if (nicknames[userObj.id]) return nicknames[userObj.id];
-    return userObj.username || 'User';
+    return userObj.username || userObj.user_metadata?.user_name || userObj.email?.split('@')[0] || 'User';
   };
 
   useEffect(() => {
@@ -1942,23 +1942,27 @@ export default function App() {
       const deliveredMembers = activeConvMembers.filter(
         (m) => m.user_id !== profile.id && getUserStatusType(m.user_id) === 'online'
       );
+      const readerNames = readers.map((r) => getDisplayName(r.profiles) || 'Member').join(', ');
 
       if (readers.length > 0) {
         return (
-          <span style={{ ...styles.statusMeta, color: '#53bdeb' }} title="Seen">
+          <span style={{ ...styles.statusMeta, color: '#53bdeb' }} title={`Seen by: ${readerNames}`}>
             <CheckCheck size={14} color="#53bdeb" />
+            <span style={{ color: '#53bdeb', fontSize: '11px', marginLeft: '2px' }}>Seen</span>
           </span>
         );
       } else if (deliveredMembers.length > 0) {
         return (
-          <span style={{ ...styles.statusMeta, color: '#8696a0' }} title="Delivered">
+          <span style={{ ...styles.statusMeta, color: '#8696a0' }} title="Delivered to online members">
             <CheckCheck size={14} color="#8696a0" />
+            <span style={{ color: '#8696a0', fontSize: '11px', marginLeft: '2px' }}>Delivered</span>
           </span>
         );
       } else {
         return (
           <span style={styles.statusMeta} title="Sent">
             <Check size={14} color="#8696a0" />
+            <span style={{ color: '#8696a0', fontSize: '11px', marginLeft: '2px' }}>Sent</span>
           </span>
         );
       }
@@ -1970,20 +1974,23 @@ export default function App() {
 
       if (isSeen) {
         return (
-          <span style={{ ...styles.statusMeta, color: '#53bdeb' }} title="Read">
+          <span style={{ ...styles.statusMeta, color: '#53bdeb' }} title="Seen">
             <CheckCheck size={15} color="#53bdeb" />
+            <span style={{ color: '#53bdeb', fontSize: '11px', fontWeight: '700', marginLeft: '2px' }}>Seen</span>
           </span>
         );
       } else if (isDelivered) {
         return (
           <span style={{ ...styles.statusMeta, color: '#8696a0' }} title="Delivered">
             <CheckCheck size={15} color="#8696a0" />
+            <span style={{ color: '#8696a0', fontSize: '11px', marginLeft: '2px' }}>Delivered</span>
           </span>
         );
       } else {
         return (
           <span style={{ ...styles.statusMeta, color: '#8696a0' }} title="Sent">
             <Check size={15} color="#8696a0" />
+            <span style={{ color: '#8696a0', fontSize: '11px', marginLeft: '2px' }}>Sent</span>
           </span>
         );
       }
@@ -3068,7 +3075,6 @@ export default function App() {
                             {activeReactionPickerMsgId === m.id && (
                               <div 
                                 style={{ ...styles.whatsappReactionPopup, [isMe ? 'right' : 'left']: 0 }}
-                                onMouseEnter={() => setHoveredMessageId(m.id)}
                               >
                                 <div style={styles.whatsappReactionInner}>
                                   {quickEmojis.map((emoji) => (
@@ -3186,7 +3192,7 @@ export default function App() {
                       Replying to {getDisplayName(replyingTo.profiles) || 'User'}:
                     </span>
                     <span style={{ fontSize: '13px', color: '#667781', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {replyingTo.content?.startsWith('https://') || repliedMsg?.content?.startsWith('[IMAGE]:') || repliedMsg?.content?.startsWith('[VIEW-ONCE]:') ? '📷 Photo' : repliedMsg?.content?.startsWith('[AUDIO]:') ? '🎤 Voice note' : (replyingTo.content || '')}
+                      {replyingTo.content?.startsWith('https://') || replyingTo.content?.startsWith('[IMAGE]:') || replyingTo.content?.startsWith('[VIEW-ONCE]:') ? '📷 Photo' : replyingTo.content?.startsWith('[AUDIO]:') ? '🎤 Voice note' : (replyingTo.content || '')}
                     </span>
                   </div>
                   <button onClick={() => setReplyingTo(null)} style={styles.bannerCloseBtn}><X size={15} /></button>
@@ -4071,7 +4077,7 @@ export default function App() {
                   </div>
                   <div style={styles.credentialRow}>
                     <span style={{ color: '#667781', fontSize: '12px' }}>Username:</span>
-                    <span style={{ fontWeight: '700', color: '#111b21', fontSize: '13px' }}>{profile?.username || 'User'}</span>
+                    <span style={{ fontWeight: '700', color: '#111b21', fontSize: '13px' }}>{getDisplayName(profile) || 'User'}</span>
                   </div>
                   <div style={styles.credentialRow}>
                     <span style={{ color: '#667781', fontSize: '12px' }}>Email:</span>
