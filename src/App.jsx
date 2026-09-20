@@ -753,7 +753,6 @@ export default function App() {
     if (data) setRequests(data);
   };
 
-  // Optimized fetchConversations (No Request Spam Loop)
   const fetchConversations = async (myId) => {
     const { data: memberRows, error } = await supabase
       .from('conversation_members')
