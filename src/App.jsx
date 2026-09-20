@@ -36,28 +36,51 @@ const EMOJI_PALETTE = [
 
 const FAVICON_SVG = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="28" cy="36" r="15" fill="%230f172a"/><path d="M12 88 C12 62 44 62 44 88 Z" fill="%230f172a"/><circle cx="72" cy="36" r="15" fill="%230f172a"/><path d="M56 88 C56 62 88 62 88 88 Z" fill="%230f172a"/><path d="M38 28 C38 18 64 18 64 28 C64 35 55 37 49 41 L43 45 L45 39 C39 39 38 34 38 28 Z" fill="%230f172a"/><rect x="43" y="24" width="16" height="2.5" rx="1.2" fill="%23ffffff"/><rect x="43" y="29" width="16" height="2.5" rx="1.2" fill="%23ffffff"/></svg>`;
 
+// A fresh AudioContext starts life 'suspended' until a user gesture unlocks
+// it, and creating a brand new one on every single notification made that
+// unlock unreliable. Keeping one shared context (created once, primed on the
+// very first user interaction — see the priming effect in App()) makes the
+// pop sound play consistently, including while the tab is in the background.
+let sharedNotificationAudioCtx = null;
+const getSharedNotificationAudioContext = () => {
+  if (sharedNotificationAudioCtx) return sharedNotificationAudioCtx;
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextClass) return null;
+  try {
+    sharedNotificationAudioCtx = new AudioContextClass();
+  } catch {
+    sharedNotificationAudioCtx = null;
+  }
+  return sharedNotificationAudioCtx;
+};
+
 const playPopNotificationSound = () => {
   try {
-    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-    if (!AudioContextClass) return;
-    const ctx = new AudioContextClass();
+    const ctx = getSharedNotificationAudioContext();
+    if (!ctx) return;
+
+    const fireTone = () => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(587.33, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.1);
+
+      gain.gain.setValueAtTime(0.18, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.28);
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.28);
+    };
+
     if (ctx.state === 'suspended') {
-      ctx.resume();
+      ctx.resume().then(fireTone).catch(() => {});
+    } else {
+      fireTone();
     }
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(587.33, ctx.currentTime);
-    osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.1);
-
-    gain.gain.setValueAtTime(0.18, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.28);
-
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.start();
-    osc.stop(ctx.currentTime + 0.28);
   } catch (err) {}
 };
 
@@ -107,6 +130,37 @@ const renderMessageTextWithLinks = (text) => {
     }
     return part;
   });
+};
+
+// Single source of truth for classifying a message's content. Previously
+// several places in the app treated ANY message starting with "https://" as
+// an uploaded photo — which meant a plain link the user pasted (or even a
+// YouTube link, which should get its own preview card) rendered as a broken
+// <img> tag instead of a normal clickable link. Real uploaded media always
+// carries an explicit "[IMAGE]:" / "[VIEW-ONCE]:" / "[AUDIO]:" / "[POLL]:"
+// prefix (see confirmSendImageMessage, startVoiceRecording, createPollMessage),
+// so only those prefixes should ever be treated as non-text content.
+const getMessageKind = (content) => {
+  if (!content) return 'text';
+  if (content.startsWith('[SYSTEM]:')) return 'system';
+  if (content.startsWith('[IMAGE]:')) return 'image';
+  if (content.startsWith('[VIEW-ONCE]:')) return 'view-once';
+  if (content.startsWith('[AUDIO]:')) return 'audio';
+  if (content.startsWith('[POLL]:')) return 'poll';
+  if (extractYouTubeId(content)) return 'youtube';
+  return 'text';
+};
+
+// Short human label used for reply-quote previews, the top toast, and push
+// notification bodies — kept consistent everywhere via getMessageKind so a
+// plain pasted link is never mislabeled as "Photo" again.
+const getMessagePreviewLabel = (content) => {
+  const kind = getMessageKind(content);
+  if (kind === 'image' || kind === 'view-once') return '📷 Photo';
+  if (kind === 'audio') return '🎤 Voice note';
+  if (kind === 'poll') return '📊 Poll';
+  if (kind === 'youtube') return '▶️ YouTube link';
+  return content || '';
 };
 
 const formatLastSeen = (isoString) => {
@@ -240,6 +294,7 @@ export default function App() {
   const receiverTypingTimersRef = useRef({});
   const globalTypingChannelRef = useRef(null);
   const snapchatBannerTimeoutRef = useRef(null);
+  const titleBlinkIntervalRef = useRef(null);
   const activeConversationRef = useRef(null);
 
   const [showAiModal, setShowAiModal] = useState(false);
@@ -437,6 +492,25 @@ export default function App() {
     }
     link.href = FAVICON_SVG;
 
+    // WhatsApp-style native-app chrome: a teal browser/status-bar tint and
+    // proper safe-area support so the header/sidebar don't sit under a
+    // phone's notch or home-indicator when added to the home screen.
+    const upsertMetaTag = (attrName, attrValue, content) => {
+      let tag = document.querySelector(`meta[${attrName}="${attrValue}"]`);
+      if (!tag) {
+        tag = document.createElement('meta');
+        tag.setAttribute(attrName, attrValue);
+        document.head.appendChild(tag);
+      }
+      tag.setAttribute('content', content);
+      return tag;
+    };
+    upsertMetaTag('name', 'theme-color', '#008069');
+    upsertMetaTag('name', 'apple-mobile-web-app-capable', 'yes');
+    upsertMetaTag('name', 'apple-mobile-web-app-status-bar-style', 'black-translucent');
+    upsertMetaTag('name', 'mobile-web-app-capable', 'yes');
+    upsertMetaTag('name', 'viewport', 'width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover');
+
     const styleTag = document.createElement('style');
     styleTag.innerHTML = `
       @keyframes typingDot {
@@ -591,6 +665,49 @@ export default function App() {
     }
   }, [unreadCounts, typingUsers, nicknames]);
 
+  // Blink the browser tab title while there are unread messages and the tab
+  // is not the one the user is currently looking at — a strong visual cue
+  // (like WhatsApp Web's unread badge) that pulls their attention back.
+  useEffect(() => {
+    const totalUnread = Object.values(unreadCounts).reduce((acc, count) => acc + (count || 0), 0);
+    const baseUnreadTitle = `(${totalUnread}) new message${totalUnread > 1 ? 's' : ''} • svpp-chat`;
+    const attentionTitle = `💬 New Message${totalUnread > 1 ? 's' : ''}!`;
+
+    const stopBlinking = () => {
+      if (titleBlinkIntervalRef.current) {
+        clearInterval(titleBlinkIntervalRef.current);
+        titleBlinkIntervalRef.current = null;
+      }
+    };
+
+    const startBlinkingIfNeeded = () => {
+      stopBlinking();
+      if (totalUnread <= 0 || document.visibilityState === 'visible') return;
+      let showingAttentionTitle = false;
+      titleBlinkIntervalRef.current = setInterval(() => {
+        showingAttentionTitle = !showingAttentionTitle;
+        document.title = showingAttentionTitle ? attentionTitle : baseUnreadTitle;
+      }, 1000);
+    };
+
+    const handleBlinkVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        stopBlinking();
+        document.title = totalUnread > 0 ? baseUnreadTitle : 'svpp-chat';
+      } else {
+        startBlinkingIfNeeded();
+      }
+    };
+
+    startBlinkingIfNeeded();
+    document.addEventListener('visibilitychange', handleBlinkVisibilityChange);
+
+    return () => {
+      stopBlinking();
+      document.removeEventListener('visibilitychange', handleBlinkVisibilityChange);
+    };
+  }, [unreadCounts]);
+
   useEffect(() => {
     const handleResize = () => setIsMobile(window.innerWidth <= 768);
     window.addEventListener('resize', handleResize);
@@ -601,6 +718,26 @@ export default function App() {
     if ('Notification' in window && Notification.permission === 'default') {
       Notification.requestPermission();
     }
+  }, []);
+
+  useEffect(() => {
+    const primeNotificationAudio = () => {
+      const ctx = getSharedNotificationAudioContext();
+      if (ctx && ctx.state === 'suspended') {
+        ctx.resume().catch(() => {});
+      }
+      window.removeEventListener('pointerdown', primeNotificationAudio);
+      window.removeEventListener('keydown', primeNotificationAudio);
+      window.removeEventListener('touchstart', primeNotificationAudio);
+    };
+    window.addEventListener('pointerdown', primeNotificationAudio, { once: true });
+    window.addEventListener('keydown', primeNotificationAudio, { once: true });
+    window.addEventListener('touchstart', primeNotificationAudio, { once: true });
+    return () => {
+      window.removeEventListener('pointerdown', primeNotificationAudio);
+      window.removeEventListener('keydown', primeNotificationAudio);
+      window.removeEventListener('touchstart', primeNotificationAudio);
+    };
   }, []);
 
   useEffect(() => {
@@ -643,6 +780,12 @@ export default function App() {
     ]);
   };
 
+  // Tunable presence constants — lower values make online/offline status feel
+  // near-instant at the cost of a bit more network chatter, which is the
+  // right trade-off for a chat app.
+  const PRESENCE_HEARTBEAT_INTERVAL_MS = 3000;
+  const PRESENCE_STALE_THRESHOLD_MS = 10000;
+
   useEffect(() => {
     if (!profile?.id) return;
 
@@ -684,11 +827,41 @@ export default function App() {
           return next;
         });
       })
-      .on('presence', { event: 'join' }, () => {
+      .on('presence', { event: 'join' }, ({ newPresences }) => {
         setOnlinePresenceState(presenceChannel.presenceState());
+        // Reflect the freshly-joined user's timestamp immediately rather
+        // than waiting for the next 'sync' tick, for an instant online flip.
+        if (newPresences && newPresences.length > 0) {
+          setUserLastSeen(prev => {
+            const next = { ...prev };
+            newPresences.forEach((p) => {
+              if (p?.online_at) next[p.presence_ref ? (p.key || p.online_at) : p.online_at] = p.online_at;
+            });
+            return next;
+          });
+        }
       })
-      .on('presence', { event: 'leave' }, () => {
+      .on('presence', { event: 'leave' }, ({ key, leftPresences }) => {
         setOnlinePresenceState(presenceChannel.presenceState());
+
+        // A user disconnecting is exactly the moment we know their true
+        // "last seen" timestamp — use the most recent presence payload they
+        // tracked (rather than waiting on the disconnecting browser's own
+        // unreliable beforeunload call) and persist it both locally and to
+        // the DB so everyone else sees an accurate last-seen right away.
+        const lastKnownPresence = leftPresences && leftPresences.length > 0
+          ? leftPresences[leftPresences.length - 1]
+          : null;
+        const lastSeenIso = lastKnownPresence?.online_at || new Date().toISOString();
+
+        if (key) {
+          setUserLastSeen(prev => ({ ...prev, [key]: lastSeenIso }));
+          supabase
+            .from('profiles')
+            .update({ last_seen: lastSeenIso })
+            .eq('id', key)
+            .then(() => {}, () => {});
+        }
       })
       .subscribe(async (status) => {
         if (status === 'SUBSCRIBED') {
@@ -701,11 +874,26 @@ export default function App() {
     };
     document.addEventListener('visibilitychange', handleVisibility);
 
+    // Window-level focus/blur catches the user switching back from another
+    // application (not just another browser tab), so "online" reflects
+    // reality as fast as possible the moment they return to the site.
+    const handleWindowFocus = () => updatePresence(true);
+    window.addEventListener('focus', handleWindowFocus);
+
     const heartbeatInterval = setInterval(() => {
       if (presenceChannel && document.visibilityState === 'visible') {
         updatePresence(true);
       }
-    }, 4000);
+    }, PRESENCE_HEARTBEAT_INTERVAL_MS);
+
+    // Forces a periodic re-render so any "zombie" presence entry (one that
+    // stopped heartbeating without a clean 'leave' event, e.g. a dropped
+    // network connection) still flips to offline in the UI within a bounded
+    // time, instead of appearing falsely online until something unrelated
+    // happens to re-render the component.
+    const staleCheckInterval = setInterval(() => {
+      setOnlinePresenceState(prev => ({ ...prev }));
+    }, PRESENCE_STALE_THRESHOLD_MS);
 
     const handleUnload = () => {
       try {
@@ -717,7 +905,9 @@ export default function App() {
 
     return () => {
       clearInterval(heartbeatInterval);
+      clearInterval(staleCheckInterval);
       document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('focus', handleWindowFocus);
       window.removeEventListener('beforeunload', handleUnload);
       updatePresence(false);
       presenceChannel.unsubscribe();
@@ -747,7 +937,7 @@ export default function App() {
       if (!p.isOnline) return false;
       if (!p.online_at) return true;
       const age = now - new Date(p.online_at).getTime();
-      return age < 20000;
+      return age < PRESENCE_STALE_THRESHOLD_MS;
     });
     return isAnyOnline ? 'online' : 'offline';
   };
@@ -804,7 +994,7 @@ export default function App() {
 
             if ('Notification' in window && Notification.permission === 'granted' && document.visibilityState !== 'visible') {
               new Notification(`New message from ${senderName}`, {
-                body: newMsg.content?.startsWith('https://') ? '📷 Photo' : newMsg.content,
+                body: getMessagePreviewLabel(newMsg.content),
                 icon: FAVICON_SVG,
               });
             }
@@ -1197,15 +1387,27 @@ export default function App() {
 
   const createGroupChat = async () => {
     if (!groupName.trim() || selectedGroupUsers.length === 0) return;
-    const { data: conv } = await supabase
+    const { data: conv, error: convError } = await supabase
       .from('conversations')
       .insert({ 
         is_group: true, 
         name: groupName.trim(), 
-        created_by: profile.id
+        created_by: profile.id,
+        admin_ids: [profile.id],
+        only_admins_can_message: false,
       })
       .select()
       .single();
+
+    if (convError) {
+      alert(
+        'Failed to create group: ' + convError.message +
+        (String(convError.message || '').toLowerCase().includes('column')
+          ? '\n\nYour conversations table may be missing the admin_ids / only_admins_can_message columns required for group admin controls — see the SQL note provided separately.'
+          : '')
+      );
+      return;
+    }
 
     if (conv) {
       const now = new Date().toISOString();
@@ -1221,6 +1423,110 @@ export default function App() {
       setSelectedGroupUsers([]);
       fetchConversations(profile.id);
     }
+  };
+
+  // Whether a given user id currently has admin rights in a group — the
+  // creator is always implicitly an admin even if somehow missing from the
+  // admin_ids array (defensive, avoids ever locking a creator out).
+  const isGroupAdmin = (conv, userId) => {
+    if (!conv || !userId) return false;
+    if (conv.created_by === userId) return true;
+    return Array.isArray(conv.admin_ids) && conv.admin_ids.includes(userId);
+  };
+
+  // Posts a small centered [SYSTEM]: announcement into the active
+  // conversation (reuses the existing system-message rendering already in
+  // the message list) — used for admin/permission changes so every member
+  // sees a clear record of what changed and by whom.
+  const postSystemMessageToActiveConversation = async (text) => {
+    if (!activeConversation) return;
+    try {
+      await supabase.from('messages').insert({
+        conversation_id: activeConversation.id,
+        sender_id: profile.id,
+        content: `[SYSTEM]:${text}`,
+      });
+    } catch (err) {}
+  };
+
+  const handleToggleAdminOnlyMessaging = async () => {
+    if (!activeConversation?.is_group || !isGroupAdmin(activeConversation, profile.id)) return;
+    const nextValue = !activeConversation.only_admins_can_message;
+
+    setActiveConversation((prev) => ({ ...prev, only_admins_can_message: nextValue }));
+    setConversations((prev) =>
+      prev.map((c) => (c.id === activeConversation.id ? { ...c, only_admins_can_message: nextValue } : c))
+    );
+
+    const { error } = await supabase
+      .from('conversations')
+      .update({ only_admins_can_message: nextValue })
+      .eq('id', activeConversation.id);
+
+    if (error) {
+      alert('Failed to update group setting: ' + error.message);
+      setActiveConversation((prev) => ({ ...prev, only_admins_can_message: !nextValue }));
+      return;
+    }
+
+    await postSystemMessageToActiveConversation(
+      nextValue
+        ? `${getDisplayName(profile)} changed the group settings to only allow admins to send messages`
+        : `${getDisplayName(profile)} changed the group settings to allow all members to send messages`
+    );
+  };
+
+  const handleMakeGroupAdmin = async (targetUserId, targetDisplayName) => {
+    if (!activeConversation?.is_group || !isGroupAdmin(activeConversation, profile.id)) return;
+    const currentAdmins = Array.isArray(activeConversation.admin_ids) ? activeConversation.admin_ids : [];
+    if (currentAdmins.includes(targetUserId)) return;
+    const updatedAdmins = [...currentAdmins, targetUserId];
+
+    setActiveConversation((prev) => ({ ...prev, admin_ids: updatedAdmins }));
+    setConversations((prev) =>
+      prev.map((c) => (c.id === activeConversation.id ? { ...c, admin_ids: updatedAdmins } : c))
+    );
+
+    const { error } = await supabase
+      .from('conversations')
+      .update({ admin_ids: updatedAdmins })
+      .eq('id', activeConversation.id);
+
+    if (error) {
+      alert('Failed to promote member: ' + error.message);
+      setActiveConversation((prev) => ({ ...prev, admin_ids: currentAdmins }));
+      return;
+    }
+
+    await postSystemMessageToActiveConversation(`${getDisplayName(profile)} made ${targetDisplayName || 'a member'} a group admin`);
+  };
+
+  const handleRemoveGroupAdmin = async (targetUserId, targetDisplayName) => {
+    if (!activeConversation?.is_group || !isGroupAdmin(activeConversation, profile.id)) return;
+    if (targetUserId === activeConversation.created_by) {
+      alert('The group creator cannot be removed as admin.');
+      return;
+    }
+    const currentAdmins = Array.isArray(activeConversation.admin_ids) ? activeConversation.admin_ids : [];
+    const updatedAdmins = currentAdmins.filter((id) => id !== targetUserId);
+
+    setActiveConversation((prev) => ({ ...prev, admin_ids: updatedAdmins }));
+    setConversations((prev) =>
+      prev.map((c) => (c.id === activeConversation.id ? { ...c, admin_ids: updatedAdmins } : c))
+    );
+
+    const { error } = await supabase
+      .from('conversations')
+      .update({ admin_ids: updatedAdmins })
+      .eq('id', activeConversation.id);
+
+    if (error) {
+      alert('Failed to remove admin: ' + error.message);
+      setActiveConversation((prev) => ({ ...prev, admin_ids: currentAdmins }));
+      return;
+    }
+
+    await postSystemMessageToActiveConversation(`${getDisplayName(profile)} removed ${targetDisplayName || 'a member'} as group admin`);
   };
 
   const handleRemoveMember = async (targetUserId, targetUsername) => {
@@ -1700,12 +2006,25 @@ export default function App() {
   const handleImageFileSelected = async (e) => {
     const file = e.target.files?.[0];
     if (!file || !activeConversation) return;
+
+    if (!file.type || !file.type.startsWith('image/')) {
+      alert('Please choose an image file (JPG, PNG, GIF, WEBP, etc).');
+      e.target.value = null;
+      return;
+    }
+    const MAX_IMAGE_BYTES = 15 * 1024 * 1024; // 15MB safety cap
+    if (file.size > MAX_IMAGE_BYTES) {
+      alert('That image is too large (max 15MB). Please choose a smaller photo.');
+      e.target.value = null;
+      return;
+    }
+
     try {
       const publicUrl = await uploadMediaToSupabaseStorage(file);
       setPendingImageUpload({ src: publicUrl });
       setIsViewOnceChecked(false);
-    } catch {
-      alert('Failed to upload image.');
+    } catch (err) {
+      alert('Failed to upload image: ' + (err?.message || 'Unknown error. Please check your connection and try again.'));
     }
     e.target.value = null;
   };
@@ -1800,40 +2119,88 @@ export default function App() {
     setPollOptions(['', '']);
   };
 
+  // Picks the best audio MIME type this browser's MediaRecorder actually
+  // supports. The previous implementation always hardcoded 'audio/webm'
+  // regardless of what the browser really recorded in — on Safari/iOS (and
+  // some other browsers) that mismatch silently produces an unplayable /
+  // corrupt file, which is why voice notes could appear to "not send" or
+  // fail to play back.
+  const pickSupportedAudioMimeType = () => {
+    if (typeof window === 'undefined' || typeof window.MediaRecorder === 'undefined') return null;
+    const candidates = [
+      'audio/webm;codecs=opus',
+      'audio/webm',
+      'audio/mp4',
+      'audio/ogg;codecs=opus',
+      'audio/ogg',
+    ];
+    for (const candidate of candidates) {
+      try {
+        if (MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(candidate)) {
+          return candidate;
+        }
+      } catch {}
+    }
+    return ''; // let the browser pick its own default
+  };
+
   const startVoiceRecording = async () => {
+    if (typeof window === 'undefined' || typeof window.MediaRecorder === 'undefined') {
+      alert('Voice messages are not supported in this browser.');
+      return;
+    }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       audioChunksRef.current = [];
-      const mediaRecorder = new MediaRecorder(stream);
+
+      const supportedMimeType = pickSupportedAudioMimeType();
+      let mediaRecorder;
+      try {
+        mediaRecorder = supportedMimeType
+          ? new MediaRecorder(stream, { mimeType: supportedMimeType })
+          : new MediaRecorder(stream);
+      } catch {
+        // A specific mimeType option can still throw on some devices even
+        // after isTypeSupported() passed — fall back to the browser default.
+        mediaRecorder = new MediaRecorder(stream);
+      }
+      const actualMimeType = mediaRecorder.mimeType || supportedMimeType || 'audio/webm';
+      const fileExtension = actualMimeType.includes('mp4') ? 'm4a' : actualMimeType.includes('ogg') ? 'ogg' : 'webm';
       mediaRecorderRef.current = mediaRecorder;
 
       mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) audioChunksRef.current.push(event.data);
+        if (event.data && event.data.size > 0) audioChunksRef.current.push(event.data);
       };
 
       mediaRecorder.onstop = async () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-        const audioFile = new File([audioBlob], 'voice.webm', { type: 'audio/webm' });
         try {
+          if (!audioChunksRef.current.length) {
+            alert('Recording was too short to send. Please try again and hold to record.');
+            return;
+          }
+          const audioBlob = new Blob(audioChunksRef.current, { type: actualMimeType });
+          const audioFile = new File([audioBlob], `voice.${fileExtension}`, { type: actualMimeType });
           const publicUrl = await uploadMediaToSupabaseStorage(audioFile);
-          await supabase.from('messages').insert({
+          const { error: insertError } = await supabase.from('messages').insert({
             conversation_id: activeConversation.id,
             sender_id: profile.id,
             content: `[AUDIO]:${publicUrl}`,
             reply_to_id: replyingTo ? replyingTo.id : null,
           });
+          if (insertError) throw insertError;
           setReplyingTo(null);
           setTimeout(() => scrollToBottom('smooth'), 50);
-        } catch {
-          alert('Failed to upload voice note.');
+        } catch (err) {
+          alert('Failed to send voice note: ' + (err?.message || 'Unknown error. Please check your connection and try again.'));
+        } finally {
+          stream.getTracks().forEach((track) => track.stop());
         }
-        stream.getTracks().forEach((track) => track.stop());
       };
 
       mediaRecorder.start();
       setIsRecording(true);
-    } catch {
-      alert('Microphone access was denied or unsupported.');
+    } catch (err) {
+      alert('Microphone access was denied or unsupported: ' + (err?.message || 'Unknown error.'));
     }
   };
 
@@ -1949,8 +2316,8 @@ export default function App() {
       setChatBg(newConfig);
       localStorage.setItem('chat_wallpaper_config', JSON.stringify(newConfig));
       setSettingsMsg({ text: 'Custom chat background applied!', type: 'success' });
-    } catch {
-      alert('Failed to apply wallpaper.');
+    } catch (err) {
+      alert('Failed to apply wallpaper: ' + (err?.message || 'Unknown error. Please check your connection and try again.'));
     }
     e.target.value = null;
   };
@@ -2449,7 +2816,7 @@ export default function App() {
               <span style={{ fontSize: '11px', color: '#00a884', fontWeight: '700' }}>• New Message</span>
             </div>
             <div style={{ fontSize: '12px', color: '#667781', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {snapchatBanner.content?.startsWith('https://') ? '📷 Photo' : snapchatBanner.content}
+              {getMessagePreviewLabel(snapchatBanner.content)}
             </div>
           </div>
           <button onClick={(e) => { e.stopPropagation(); setSnapchatBanner(null); }} style={styles.snapCloseBtn}>
@@ -3015,11 +3382,12 @@ export default function App() {
 
                   const isMe = m.sender_id === profile?.id;
                   const time = new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                  const isImage = m.content?.startsWith('[IMAGE]:') || (m.content?.startsWith('https://') && !m.content?.startsWith('[AUDIO]:') && !m.content?.startsWith('[POLL]:'));
-                  const isViewOnceImg = m.content?.startsWith('[VIEW-ONCE]:');
-                  const isAudio = m.content?.startsWith('[AUDIO]:');
-                  const isPoll = m.content?.startsWith('[POLL]:');
-                  const youtubeId = !isImage && !isViewOnceImg && !isAudio && !isPoll ? extractYouTubeId(m.content) : null;
+                  const msgKind = getMessageKind(m.content);
+                  const isImage = msgKind === 'image';
+                  const isViewOnceImg = msgKind === 'view-once';
+                  const isAudio = msgKind === 'audio';
+                  const isPoll = msgKind === 'poll';
+                  const youtubeId = msgKind === 'youtube' ? extractYouTubeId(m.content) : null;
 
                   const isHovered = hoveredMessageId === m.id;
                   const isTapped = tappedMessageId === m.id;
@@ -3120,7 +3488,7 @@ export default function App() {
                                     {getDisplayName(repliedMsg.profiles) || 'User'}
                                   </div>
                                   <div style={{ fontSize: '11px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', opacity: 0.85 }}>
-                                    {repliedMsg.content?.startsWith('https://') || repliedMsg.content?.startsWith('[IMAGE]:') || repliedMsg.content?.startsWith('[VIEW-ONCE]:') ? '📷 Photo' : repliedMsg.content?.startsWith('[AUDIO]:') ? '🎤 Voice note' : (repliedMsg.content || '')}
+                                    {getMessagePreviewLabel(repliedMsg.content)}
                                   </div>
                                 </div>
                               )}
@@ -3440,7 +3808,7 @@ export default function App() {
                       Replying to {getDisplayName(replyingTo.profiles) || 'User'}:
                     </span>
                     <span style={{ fontSize: '13px', color: '#667781', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {replyingTo.content?.startsWith('https://') || replyingTo.content?.startsWith('[IMAGE]:') || replyingTo.content?.startsWith('[VIEW-ONCE]:') ? '📷 Photo' : replyingTo.content?.startsWith('[AUDIO]:') ? '🎤 Voice note' : (replyingTo.content || '')}
+                      {getMessagePreviewLabel(replyingTo.content)}
                     </span>
                   </div>
                   <button onClick={() => setReplyingTo(null)} style={styles.bannerCloseBtn}><X size={15} /></button>
@@ -3479,6 +3847,11 @@ export default function App() {
                   <div style={styles.notFriendsGateBanner}>
                     <AlertTriangle size={18} color="#b45309" />
                     <span>{isAccountDeleted ? 'Account deleted' : 'unfriend'}. You can no longer chat with this user!</span>
+                  </div>
+                ) : (activeConversation?.is_group && activeConversation.only_admins_can_message && !isGroupAdmin(activeConversation, profile.id)) ? (
+                  <div style={styles.notFriendsGateBanner}>
+                    <Lock size={18} color="#b45309" />
+                    <span>Only admins can send messages in this group.</span>
                   </div>
                 ) : isRecording ? (
                   <div style={styles.recordingBar}>
@@ -3582,13 +3955,13 @@ export default function App() {
               Photos, voice notes, and links shared in this conversation:
             </p>
             <div style={{ ...styles.modalScrollList, maxHeight: '320px' }}>
-              {messages.filter(m => m.content?.startsWith('[IMAGE]:') || m.content?.startsWith('https://') || m.content?.startsWith('[AUDIO]:')).length === 0 ? (
+              {messages.filter(m => getMessageKind(m.content) === 'image' || getMessageKind(m.content) === 'audio').length === 0 ? (
                 <div style={{ padding: '24px', textAlign: 'center', color: '#8696a0', fontSize: '14px' }}>
                   No media shared in this chat yet.
                 </div>
               ) : (
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
-                  {messages.filter(m => m.content?.startsWith('[IMAGE]:') || m.content?.startsWith('https://')).map(m => {
+                  {messages.filter(m => getMessageKind(m.content) === 'image').map(m => {
                     const imgUrl = m.content.replace('[IMAGE]:', '');
                     return (
                       <img
@@ -4115,6 +4488,43 @@ export default function App() {
             </div>
 
             <div style={{ marginTop: '12px' }}>
+              <div
+                style={{
+                  ...styles.credentialsViewerCard,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '10px',
+                  marginBottom: '14px',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Lock size={16} color="#00a884" />
+                  <div>
+                    <div style={{ fontWeight: '700', fontSize: '13px', color: '#111b21' }}>Only admins send messages</div>
+                    <div style={{ fontSize: '11.5px', color: '#667781' }}>
+                      {activeConversation.only_admins_can_message ? 'Only group admins can send messages' : 'All members can send messages'}
+                    </div>
+                  </div>
+                </div>
+                {isGroupAdmin(activeConversation, profile.id) ? (
+                  <button
+                    onClick={handleToggleAdminOnlyMessaging}
+                    style={{
+                      ...styles.filterPillActive,
+                      backgroundColor: activeConversation.only_admins_can_message ? '#d9fdd3' : '#f0f2f5',
+                      color: activeConversation.only_admins_can_message ? '#00a884' : '#54656f',
+                      border: '1px solid ' + (activeConversation.only_admins_can_message ? '#00a884' : '#e9edef'),
+                    }}
+                    title="Toggle admin-only messaging"
+                  >
+                    {activeConversation.only_admins_can_message ? 'On' : 'Off'}
+                  </button>
+                ) : (
+                  <span style={{ fontSize: '11px', fontWeight: '700', color: '#8696a0' }}>Admins only setting</span>
+                )}
+              </div>
+
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                 <span style={styles.sectionHeading}>Members</span>
                 <button 
@@ -4133,6 +4543,8 @@ export default function App() {
                   const isOwner = activeConversation.created_by === m.user_id;
                   const isSelf = m.user_id === profile.id;
                   const amIGroupOwner = activeConversation.created_by === profile.id;
+                  const amIGroupAdmin = isGroupAdmin(activeConversation, profile.id);
+                  const isMemberAdmin = isGroupAdmin(activeConversation, m.user_id);
                   const memName = getDisplayName(m.profiles);
 
                   return (
@@ -4145,12 +4557,39 @@ export default function App() {
                         </div>
                       </div>
 
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
                         {isOwner && (
                           <div style={styles.groupOwnerBadge} title="Group Creator & Admin">
                             <Crown size={12} color="#b45309" />
                             <span>Owner</span>
                           </div>
+                        )}
+
+                        {!isOwner && isMemberAdmin && (
+                          <div style={styles.groupAdminBadge} title="Group Admin">
+                            <ShieldCheck size={12} color="#00a884" />
+                            <span>Admin</span>
+                          </div>
+                        )}
+
+                        {amIGroupAdmin && !isSelf && !isMemberAdmin && (
+                          <button
+                            onClick={() => handleMakeGroupAdmin(m.user_id, memName)}
+                            style={styles.makeAdminBtn}
+                            title="Make this member a group admin"
+                          >
+                            <ShieldCheck size={14} /> Make Admin
+                          </button>
+                        )}
+
+                        {amIGroupAdmin && !isSelf && isMemberAdmin && !isOwner && (
+                          <button
+                            onClick={() => handleRemoveGroupAdmin(m.user_id, memName)}
+                            style={styles.removeMemberBtn}
+                            title="Remove admin rights from this member"
+                          >
+                            <ShieldCheck size={14} /> Remove Admin
+                          </button>
                         )}
 
                         {amIGroupOwner && !isSelf && (
@@ -4871,6 +5310,8 @@ const styles = {
   openChatBtn: { padding: '6px 14px', borderRadius: '8px', background: '#00a884', color: '#fff', border: 'none', cursor: 'pointer', fontSize: '12.5px', fontWeight: '700' },
   checkboxItem: { display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', color: '#111b21', cursor: 'pointer' },
   groupOwnerBadge: { display: 'flex', alignItems: 'center', gap: '4px', backgroundColor: '#fef3c7', color: '#b45309', border: '1px solid #fde68a', padding: '3px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: '700' },
+  groupAdminBadge: { display: 'flex', alignItems: 'center', gap: '4px', backgroundColor: '#d9fdd3', color: '#00a884', border: '1px solid #bbf7d0', padding: '3px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: '700' },
+  makeAdminBtn: { display: 'flex', alignItems: 'center', gap: '4px', backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0', color: '#15803d', padding: '4px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: '700', cursor: 'pointer' },
   removeMemberBtn: { display: 'flex', alignItems: 'center', gap: '4px', backgroundColor: '#fef2f2', border: '1px solid #fecaca', color: '#dc2626', padding: '4px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: '700', cursor: 'pointer' },
   leaveGroupBtn: { width: '100%', padding: '10px', borderRadius: '10px', backgroundColor: '#fef2f2', border: '1px solid #fecaca', color: '#dc2626', fontWeight: '700', fontSize: '13px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' },
   modalActions: { display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '14px' },
