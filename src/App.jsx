@@ -502,11 +502,18 @@ export default function App() {
       config: { presence: { key: profile.id } }
     });
 
-    const updatePresence = () => {
-      const isOnlineNow = document.visibilityState === 'visible';
+    const updatePresence = async (isOnline) => {
+      const now = new Date().toISOString();
+      try {
+        await supabase
+          .from('profiles')
+          .update({ last_seen: now })
+          .eq('id', profile.id);
+      } catch (err) {}
+
       presenceChannel.track({
-        online_at: new Date().toISOString(),
-        isOnline: isOnlineNow,
+        online_at: now,
+        isOnline: isOnline,
       });
     };
 
@@ -537,28 +544,50 @@ export default function App() {
       })
       .subscribe(async (status) => {
         if (status === 'SUBSCRIBED') {
-          updatePresence();
+          updatePresence(true);
         }
       });
 
-    const handleVisibility = () => updatePresence();
+    const handleVisibility = () => {
+      updatePresence(document.visibilityState === 'visible');
+    };
     document.addEventListener('visibilitychange', handleVisibility);
 
     const heartbeatInterval = setInterval(() => {
       if (presenceChannel && document.visibilityState === 'visible') {
-        presenceChannel.track({
-          online_at: new Date().toISOString(),
-          isOnline: true,
-        });
+        updatePresence(true);
       }
     }, 8000);
+
+    const handleUnload = () => {
+      try {
+        const now = new Date().toISOString();
+        supabase.from('profiles').update({ last_seen: now }).eq('id', profile.id);
+      } catch (e) {}
+    };
+    window.addEventListener('beforeunload', handleUnload);
 
     return () => {
       clearInterval(heartbeatInterval);
       document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('beforeunload', handleUnload);
+      updatePresence(false);
       presenceChannel.unsubscribe();
     };
   }, [profile?.id]);
+
+  const handleSignOut = async () => {
+    if (profile?.id) {
+      try {
+        await supabase
+          .from('profiles')
+          .update({ last_seen: new Date().toISOString() })
+          .eq('id', profile.id);
+      } catch (e) {}
+    }
+    await supabase.auth.signOut();
+    localStorage.removeItem('svpp_user_session_pwd');
+  };
 
   const getUserStatusType = (userId) => {
     if (userId === profile?.id) return 'online';
@@ -1775,8 +1804,7 @@ export default function App() {
       const { error } = await supabase.rpc('delete_own_account');
       if (error) throw error;
 
-      await supabase.auth.signOut();
-      localStorage.removeItem('svpp_user_session_pwd');
+      await handleSignOut();
       alert('Account deleted. This email can be re-registered anytime.');
       window.location.reload();
     } catch (err) {
@@ -2171,7 +2199,7 @@ export default function App() {
               <button onClick={() => setShowSettingsModal(true)} style={styles.iconButton} title="Settings & Customization">
                 <Settings size={20} />
               </button>
-              <button onClick={() => supabase.auth.signOut()} style={styles.iconButton} title="Logout">
+              <button onClick={handleSignOut} style={styles.iconButton} title="Logout">
                 <LogOut size={20} />
               </button>
             </div>
