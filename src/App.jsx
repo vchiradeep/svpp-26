@@ -2943,24 +2943,21 @@ export default function App() {
                                 color: '#111b21',
                                 borderBottomRightRadius: isMe ? '2px' : '8px',
                                 borderBottomLeftRadius: isMe ? '8px' : '2px',
-                                padding: (isImage || isViewOnceImg) ? '4px' : '8px 12px 6px',
+                                padding: (isImage || isViewOnceImg) ? '4px' : '8px 28px 6px 12px',
                                 minWidth: isPoll ? '260px' : youtubeId ? '240px' : 'auto',
                               }}
                             >
-                              {/* WhatsApp style hover chevron arrow */}
+                              {/* WhatsApp style hover chevron arrow positioned inside top-right */}
                               {isHovered && (
                                 <button
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     setOpenMessageMenuId(openMessageMenuId === m.id ? null : m.id);
                                   }}
-                                  style={{
-                                    ...styles.messageChevronBtn,
-                                    [isMe ? 'left' : 'right']: '-22px',
-                                  }}
+                                  style={styles.messageChevronBtn}
                                   title="Message Options"
                                 >
-                                  <ChevronDown size={15} color="#54656f" />
+                                  <ChevronDown size={14} color="#54656f" />
                                 </button>
                               )}
 
@@ -4619,8 +4616,8 @@ const styles = {
   chatDateDividerBadge: { backgroundColor: '#e1f3fb', color: '#54656f', fontSize: '11.5px', fontWeight: '700', padding: '5px 12px', borderRadius: '8px', boxShadow: '0 1px 2px rgba(0,0,0,0.08)' },
 
   replyQuoteBox: { borderLeft: '4px solid', padding: '4px 8px', borderRadius: '4px', marginBottom: '4px' },
-  messageChevronBtn: { position: 'absolute', top: '4px', width: '22px', height: '22px', backgroundColor: '#ffffff', border: '1px solid #e9edef', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', zIndex: 15, boxShadow: '0 2px 5px rgba(0,0,0,0.1)' },
-  whatsappDropdownMenu: { position: 'absolute', top: '28px', backgroundColor: '#ffffff', borderRadius: '10px', boxShadow: '0 8px 24px rgba(0,0,0,0.18)', border: '1px solid #e9edef', zIndex: 60, padding: '6px 0', width: '150px', display: 'flex', flexDirection: 'column' },
+  messageChevronBtn: { position: 'absolute', top: '4px', right: '4px', width: '20px', height: '20px', backgroundColor: 'rgba(0,0,0,0.06)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', zIndex: 15 },
+  whatsappDropdownMenu: { position: 'absolute', top: '28px', right: '4px', backgroundColor: '#ffffff', borderRadius: '10px', boxShadow: '0 8px 24px rgba(0,0,0,0.18)', border: '1px solid #e9edef', zIndex: 60, padding: '6px 0', width: '150px', display: 'flex', flexDirection: 'column' },
   whatsappDropItem: { display: 'flex', alignItems: 'center', gap: '10px', padding: '9px 14px', background: 'none', border: 'none', fontSize: '13.5px', color: '#111b21', fontWeight: '600', cursor: 'pointer', textAlign: 'left', width: '100%' },
 
   quickHoverBar: { display: 'flex', alignItems: 'center', gap: '2px', backgroundColor: '#ffffff', border: '1px solid #e9edef', borderRadius: '16px', padding: '2px 6px', boxShadow: '0 2px 8px rgba(0,0,0,0.08)' },
