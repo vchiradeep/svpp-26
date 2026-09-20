@@ -14,8 +14,9 @@ export const fetchUserConversations = async (myId) => {
     .from('conversations')
     .select(`
       id, is_group, name, avatar_url, created_by, created_at,
+      admin_ids, only_admins_can_message,
       conversation_members(conversation_id, user_id, hidden_at, last_read_at, profiles(id, username, avatar_url)),
-      messages(id, conversation_id, sender_id, content, created_at)
+      messages(id, conversation_id, sender_id, content, created_at, is_deleted_for_everyone, deleted_for)
     `)
     .in('id', convIds);
 

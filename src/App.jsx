@@ -1162,8 +1162,18 @@ export default function App() {
       return;
     }
 
+    // A message deleted-for-everyone, or deleted just for me, should never
+    // count toward my unread badge or be treated as the conversation's most
+    // recent message in the sidebar preview/ordering.
+    const isMessageVisibleToMe = (m) => {
+      if (!m) return false;
+      if (m.is_deleted_for_everyone) return false;
+      if (Array.isArray(m.deleted_for) && m.deleted_for.includes(myId)) return false;
+      return true;
+    };
+
     const sortedConvs = convList.map((c) => {
-      const msgs = c.messages || [];
+      const msgs = (c.messages || []).filter(isMessageVisibleToMe);
       const latestMsgTime = msgs.length > 0 
         ? Math.max(...msgs.map((m) => new Date(m.created_at).getTime()))
         : new Date(c.created_at).getTime();
@@ -1179,7 +1189,9 @@ export default function App() {
       if (activeConversationRef.current?.id === c.id) {
         newUnread[c.id] = 0;
       } else {
-        const unread = (c.messages || []).filter((m) => m.sender_id !== myId && new Date(m.created_at) > new Date(lastRead)).length;
+        const unread = (c.messages || [])
+          .filter(isMessageVisibleToMe)
+          .filter((m) => m.sender_id !== myId && new Date(m.created_at) > new Date(lastRead)).length;
         newUnread[c.id] = unread;
       }
     });
@@ -2942,8 +2954,14 @@ export default function App() {
                     const chatUnread = unreadCounts[c.id] || 0;
                     const isTypingNow = convTypingMap[c.id];
 
-                    const latestMsg = c.messages && c.messages.length > 0
-                      ? c.messages.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0]
+                    const visibleMessagesForRow = (c.messages || []).filter((m) => {
+                      if (!m) return false;
+                      if (m.is_deleted_for_everyone) return false;
+                      if (Array.isArray(m.deleted_for) && m.deleted_for.includes(profile?.id)) return false;
+                      return true;
+                    });
+                    const latestMsg = visibleMessagesForRow.length > 0
+                      ? visibleMessagesForRow.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0]
                       : null;
                     const chatTimestamp = formatChatTimestamp(latestMsg?.created_at || c.created_at);
                      
