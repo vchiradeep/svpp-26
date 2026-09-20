@@ -993,7 +993,7 @@ export default function App() {
 
     supabase
       .from('messages')
-      .select('*, profiles(id, username, avatar_url, user_metadata), reply_to:messages!reply_to_id(*, profiles(id, username, avatar_url, user_metadata))')
+      .select('*, profiles(id, username, avatar_url, user_metadata)')
       .eq('conversation_id', c.id)
       .order('created_at', { ascending: false })
       .range(0, 35)
@@ -1309,7 +1309,7 @@ export default function App() {
 
     const { data, error } = await supabase
       .from('messages')
-      .select('*, profiles(id, username, avatar_url, user_metadata), reply_to:messages!reply_to_id(*, profiles(id, username, avatar_url, user_metadata))')
+      .select('*, profiles(id, username, avatar_url, user_metadata)')
       .eq('conversation_id', activeConversation.id)
       .lt('created_at', oldestMsgCreatedAt)
       .order('created_at', { ascending: false })
@@ -1478,7 +1478,7 @@ export default function App() {
           content,
           reply_to_id: replyId,
         })
-        .select('*, profiles(id, username, avatar_url, user_metadata), reply_to:messages!reply_to_id(*, profiles(id, username, avatar_url, user_metadata))')
+        .select('*, profiles(id, username, avatar_url, user_metadata)')
         .single();
 
       if (error) throw error;
@@ -1993,7 +1993,7 @@ export default function App() {
         return (
           <span style={{ ...styles.statusMeta, color: '#53bdeb' }} title={`Seen by: ${readerNames}`}>
             <CheckCheck size={14} color="#53bdeb" />
-            <span style={{ color: '#53bdeb', fontSize: '11px', marginLeft: '2px' }}>Seen</span>
+            <span style={{ color: '#53bdeb', fontSize: '11px', marginLeft: '2px' }}>Seen by: {readerNames}</span>
           </span>
         );
       } else if (deliveredMembers.length > 0) {
@@ -2275,7 +2275,7 @@ export default function App() {
   const isCurrentChatTyping = typingUserList.length > 0;
 
   return (
-    <div style={styles.appContainer} onClick={() => setChatDropdownOpenId(null)}>
+    <div style={styles.appContainer} onClick={() => setOpenMessageMenuId(null)}>
        
       {snapchatBanner && (
         <div 
