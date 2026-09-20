@@ -11,7 +11,7 @@ import {
   UserCheck, UserX, MessageCircle, Smile, Edit2, CornerUpLeft, 
   CheckCheck, AlertCircle, ChevronDown, Crown, User, UserMinus, 
   Eye, EyeOff, Bot, HelpCircle, Flame, Lock, Archive, ShieldCheck, 
-  BarChart2, ExternalLink, Play, Tag
+  BarChart2, ExternalLink, Play, Tag, Share2, FileText
 } from 'lucide-react';
 
 const EMAILJS_SERVICE_ID = 'service_l1fiok5';
@@ -221,6 +221,13 @@ export default function App() {
   const [typingUsers, setTypingUsers] = useState({});
   const [convTypingMap, setConvTypingMap] = useState({});
   const [snapchatBanner, setSnapchatBanner] = useState(null);
+
+  // Forward Modal state
+  const [forwardingMessage, setForwardingMessage] = useState(null);
+  const [showForwardModal, setShowForwardModal] = useState(false);
+
+  // Media Gallery state
+  const [showMediaGalleryModal, setShowMediaGalleryModal] = useState(false);
    
   const lastTypingBroadcastTimeRef = useRef(0);
   const typingStopTimerRef = useRef(null);
@@ -353,6 +360,8 @@ export default function App() {
         setShowGroupInfoModal(false);
         setShowAddMemberModal(false);
         setShowPollModal(false);
+        setShowForwardModal(false);
+        setShowMediaGalleryModal(false);
         setProfilePreviewTarget(null);
         setReactionDetailsTarget(null);
         setPendingImageUpload(null);
@@ -455,6 +464,21 @@ export default function App() {
         background: conic-gradient(#0084ff, #44bec7, #ffc300, #fa3c4c, #d696bb, #0084ff);
         animation: metaAiRotate 4s linear infinite;
       }
+
+      @keyframes waveBar {
+        0%, 100% { height: 8px; }
+        50% { height: 24px; }
+      }
+      .wave-bar {
+        width: 4px;
+        background-color: #00a884;
+        border-radius: 2px;
+        animation: waveBar 1.2s infinite ease-in-out;
+      }
+      .wave-bar:nth-child(2) { animation-delay: 0.2s; }
+      .wave-bar:nth-child(3) { animation-delay: 0.4s; }
+      .wave-bar:nth-child(4) { animation-delay: 0.6s; }
+      .wave-bar:nth-child(5) { animation-delay: 0.8s; }
     `;
     document.head.appendChild(styleTag);
     return () => {
@@ -528,6 +552,7 @@ export default function App() {
     ]);
   };
 
+  // Presence Heartbeat set to 4 seconds for ultra-fast online detection
   useEffect(() => {
     if (!profile?.id) return;
 
@@ -590,7 +615,7 @@ export default function App() {
       if (presenceChannel && document.visibilityState === 'visible') {
         updatePresence(true);
       }
-    }, 8000);
+    }, 4000);
 
     const handleUnload = () => {
       try {
@@ -632,7 +657,7 @@ export default function App() {
       if (!p.isOnline) return false;
       if (!p.online_at) return true;
       const age = now - new Date(p.online_at).getTime();
-      return age < 25000;
+      return age < 20000;
     });
     return isAnyOnline ? 'online' : 'offline';
   };
@@ -687,6 +712,7 @@ export default function App() {
               setSnapchatBanner(null);
             }, 3800);
 
+            // Desktop native push notification
             if ('Notification' in window && Notification.permission === 'granted' && document.visibilityState !== 'visible') {
               new Notification(`New message from ${senderName}`, {
                 body: newMsg.content?.startsWith('https://') ? '📷 Photo' : newMsg.content,
@@ -1477,6 +1503,24 @@ export default function App() {
     }
   };
 
+  const handleForwardMessageToConv = async (targetConvId) => {
+    if (!forwardingMessage) return;
+    const contentToForward = forwardingMessage.content;
+    setForwardingMessage(null);
+    setShowForwardModal(false);
+
+    try {
+      await supabase.from('messages').insert({
+        conversation_id: targetConvId,
+        sender_id: profile.id,
+        content: contentToForward,
+      });
+      alert('Message forwarded successfully!');
+    } catch (err) {
+      alert('Failed to forward message: ' + err.message);
+    }
+  };
+
   const handleSelectReaction = async (msgId, chosenEmoji) => {
     setActiveReactionPickerMsgId(null);
     setShowExtendedReactions(false);
@@ -1948,7 +1992,7 @@ export default function App() {
         return (
           <span style={{ ...styles.statusMeta, color: '#53bdeb' }} title={`Seen by: ${readerNames}`}>
             <CheckCheck size={14} color="#53bdeb" />
-            <span style={{ color: '#53bdeb', fontSize: '11px', marginLeft: '2px' }}>Seen</span>
+            <span style={{ color: '#53bdeb', fontSize: '11px', marginLeft: '2px' }}>Seen by: {readerNames}</span>
           </span>
         );
       } else if (deliveredMembers.length > 0) {
@@ -2631,10 +2675,14 @@ export default function App() {
               <div style={styles.windowHeader}>
                 <div 
                   onClick={() => {
-                    if (activeConversation.is_group) setShowGroupInfoModal(true);
+                    if (activeConversation.is_group) {
+                      setShowGroupInfoModal(true);
+                    } else {
+                      setShowMediaGalleryModal(true);
+                    }
                   }}
-                  style={{ ...styles.windowHeaderInfo, cursor: activeConversation.is_group ? 'pointer' : 'default' }}
-                  title={activeConversation.is_group ? 'Click for group members & info' : ''}
+                  style={{ ...styles.windowHeaderInfo, cursor: 'pointer' }}
+                  title="Click to view media gallery & info"
                 >
                   {isMobile && (
                     <button onClick={(e) => { e.stopPropagation(); setActiveConversation(null); }} style={styles.backBtn}>
@@ -2672,7 +2720,7 @@ export default function App() {
                       <span style={{
                         fontSize: '12px',
                         fontWeight: '500',
-                        color: (activeConversation.is_group ? groupOnlineCount > 0 : (otherStatusType !== 'offline' && !isAccountDeleted)) ? '#00a884' : '#667781',
+                        color: (activeConversation.is_group ? groupOnlineCount > 0 : (otherStatusType === 'online' && !isAccountDeleted)) ? '#00a884' : '#667781',
                       }}>
                         {activeConversation.is_group
                           ? `${activeConvMembers.length} members • ${groupOnlineCount} online`
@@ -2680,13 +2728,22 @@ export default function App() {
                             ? 'Account removed' 
                             : isUnfriended 
                               ? 'Unfriended' 
-                              : (otherStatusType === 'online' ? '● Online' : formatLastSeen(userLastSeen[otherUserId]))}
+                              : (otherStatusType === 'online' ? <span style={{ color: '#00a884', fontWeight: '700' }}>● online</span> : formatLastSeen(userLastSeen[otherUserId]))}
                       </span>
                     )}
                   </div>
                 </div>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <button
+                    onClick={() => setShowMediaGalleryModal(true)}
+                    style={styles.pollHeaderBtn}
+                    title="View Shared Media & Links"
+                  >
+                    <ImageIcon size={16} />
+                    {!isMobile && <span>Media</span>}
+                  </button>
+
                   {activeConversation.is_group && (
                     <>
                       <button 
@@ -2935,11 +2992,15 @@ export default function App() {
                                   style={{ maxWidth: '100%', maxHeight: '280px', borderRadius: '8px', display: 'block', cursor: 'pointer' }}
                                 />
                               ) : isAudio ? (
-                                <audio
-                                  controls
-                                  src={mediaUrl}
-                                  style={{ maxWidth: '240px', height: '36px', outline: 'none' }}
-                                />
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '4px 0', minWidth: '200px' }}>
+                                  <audio controls src={mediaUrl} style={{ height: '32px', width: '160px' }} />
+                                  <div style={{ display: 'flex', gap: '3px', alignItems: 'flex-end', height: '24px' }}>
+                                    <div className="wave-bar" style={{ animationDuration: '0.8s' }}></div>
+                                    <div className="wave-bar" style={{ animationDuration: '1.1s' }}></div>
+                                    <div className="wave-bar" style={{ animationDuration: '0.6s' }}></div>
+                                    <div className="wave-bar" style={{ animationDuration: '0.9s' }}></div>
+                                  </div>
+                                </div>
                               ) : isPoll ? (
                                 (() => {
                                   try {
@@ -3052,6 +3113,13 @@ export default function App() {
                                 style={styles.quickIconBtn} 
                                 title="Reply">
                                 <CornerUpLeft size={14} />
+                              </button>
+
+                              <button 
+                                onClick={(e) => { e.stopPropagation(); setForwardingMessage(m); setShowForwardModal(true); }} 
+                                style={styles.quickIconBtn} 
+                                title="Forward Message">
+                                <Share2 size={13} />
                               </button>
 
                               {isMe && !isImage && !isViewOnceImg && !isAudio && !isPoll && (
@@ -3317,6 +3385,94 @@ export default function App() {
             </div>
           )}
         </main>
+      )}
+
+      {/* MEDIA GALLERY MODAL */}
+      {showMediaGalleryModal && activeConversation && (
+        <div style={styles.modalBackdrop} onClick={() => setShowMediaGalleryModal(false)}>
+          <div style={{ ...styles.modalBox, maxWidth: '520px' }} onClick={(e) => e.stopPropagation()}>
+            <div style={styles.modalHead}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <ImageIcon size={20} color="#00a884" />
+                <h4 style={{ margin: 0, fontSize: '18px' }}>Shared Media & Links</h4>
+              </div>
+              <button onClick={() => setShowMediaGalleryModal(false)} style={styles.closeBtn}><X size={20} /></button>
+            </div>
+            <p style={{ fontSize: '13px', color: '#667781', margin: '0 0 12px' }}>
+              Photos, voice notes, and links shared in this conversation:
+            </p>
+            <div style={{ ...styles.modalScrollList, maxHeight: '320px' }}>
+              {messages.filter(m => m.content?.startsWith('[IMAGE]:') || m.content?.startsWith('https://') || m.content?.startsWith('[AUDIO]:')).length === 0 ? (
+                <div style={{ padding: '24px', textAlign: 'center', color: '#8696a0', fontSize: '14px' }}>
+                  No media shared in this chat yet.
+                </div>
+              ) : (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
+                  {messages.filter(m => m.content?.startsWith('[IMAGE]:') || m.content?.startsWith('https://')).map(m => {
+                    const imgUrl = m.content.replace('[IMAGE]:', '');
+                    return (
+                      <img
+                        key={m.id}
+                        src={imgUrl}
+                        alt="Shared media"
+                        onClick={() => {
+                          setPreviewImage({ src: imgUrl, title: 'Shared Photo' });
+                          setShowMediaGalleryModal(false);
+                        }}
+                        style={{ width: '100%', height: '100px', objectFit: 'cover', borderRadius: '8px', cursor: 'pointer' }}
+                      />
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+            <div style={styles.modalActions}>
+              <button onClick={() => setShowMediaGalleryModal(false)} style={styles.secondaryBtn}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* FORWARD MESSAGE MODAL */}
+      {showForwardModal && forwardingMessage && (
+        <div style={styles.modalBackdrop} onClick={() => setShowForwardModal(false)}>
+          <div style={styles.modalBox} onClick={(e) => e.stopPropagation()}>
+            <div style={styles.modalHead}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Share2 size={20} color="#00a884" />
+                <h4 style={{ margin: 0, fontSize: '18px' }}>Forward Message To...</h4>
+              </div>
+              <button onClick={() => setShowForwardModal(false)} style={styles.closeBtn}><X size={20} /></button>
+            </div>
+            <p style={{ fontSize: '13px', color: '#667781', margin: '0 0 12px' }}>
+              Select a chat to forward this message:
+            </p>
+            <div style={styles.modalScrollList}>
+              {visibleConversations.map((c) => {
+                const otherMem = c.conversation_members?.find(m => m.user_id !== profile?.id)?.profiles;
+                const title = c.is_group ? c.name : getDisplayName(otherMem) || 'Chat';
+                return (
+                  <div
+                    key={c.id}
+                    onClick={() => handleForwardMessageToConv(c.id)}
+                    style={styles.modalFriendRow}
+                  >
+                    {renderAvatar(c.is_group ? c.avatar_url : otherMem?.avatar_url, title, 36, false, 'online')}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: '700', fontSize: '14px', color: '#111b21', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {title}
+                      </div>
+                    </div>
+                    <button style={styles.openChatBtn}>Forward</button>
+                  </div>
+                );
+              })}
+            </div>
+            <div style={styles.modalActions}>
+              <button onClick={() => setShowForwardModal(false)} style={styles.secondaryBtn}>Cancel</button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* REACTION DETAILS MODAL */}
