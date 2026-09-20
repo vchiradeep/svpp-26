@@ -41,6 +41,9 @@ const playPopNotificationSound = () => {
     const AudioContextClass = window.AudioContext || window.webkitAudioContext;
     if (!AudioContextClass) return;
     const ctx = new AudioContextClass();
+    if (ctx.state === 'suspended') {
+      ctx.resume();
+    }
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
 
@@ -332,6 +335,36 @@ export default function App() {
   const avatarInputRef = useRef(null);
   const groupAvatarInputRef = useRef(null);
   const bgImageInputRef = useRef(null);
+
+  // Desktop keyboard shortcuts (WhatsApp Desktop style)
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'n') {
+        e.preventDefault();
+        setShowNewChatModal(true);
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'g') {
+        e.preventDefault();
+        setShowGroupModal(true);
+      } else if (e.key === 'Escape') {
+        setShowAiModal(false);
+        setShowSettingsModal(false);
+        setShowNewChatModal(false);
+        setShowGroupModal(false);
+        setShowGroupInfoModal(false);
+        setShowAddMemberModal(false);
+        setShowPollModal(false);
+        setProfilePreviewTarget(null);
+        setReactionDetailsTarget(null);
+        setPendingImageUpload(null);
+        setViewOnceViewerData(null);
+        if (isMobile && activeConversation) {
+          setActiveConversation(null);
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isMobile, activeConversation]);
 
   useEffect(() => {
     activeConversationRef.current = activeConversation;
@@ -626,15 +659,17 @@ export default function App() {
         fetchConversations(profile.id);
       })
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, async (payload) => {
-        const isMsgInCurrentActiveChat = activeConversationRef.current?.id === payload.new.conversation_id;
+        const newMsg = payload.new;
+        const convId = newMsg.conversation_id;
+        const isMsgInCurrentActiveChat = activeConversationRef.current?.id === convId;
 
-        if (payload.new.sender_id !== profile.id) {
+        if (newMsg.sender_id !== profile.id) {
           playPopNotificationSound();
 
           const { data: senderInfo } = await supabase
             .from('profiles')
             .select('username, avatar_url')
-            .eq('id', payload.new.sender_id)
+            .eq('id', newMsg.sender_id)
             .single();
 
           if (senderInfo) {
@@ -643,8 +678,8 @@ export default function App() {
             setSnapchatBanner({
               username: senderName,
               avatar_url: senderInfo.avatar_url,
-              content: payload.new.content,
-              convId: payload.new.conversation_id,
+              content: newMsg.content,
+              convId: convId,
             });
 
             clearTimeout(snapchatBannerTimeoutRef.current);
@@ -654,21 +689,40 @@ export default function App() {
 
             if ('Notification' in window && Notification.permission === 'granted' && document.visibilityState !== 'visible') {
               new Notification(`New message from ${senderName}`, {
-                body: payload.new.content?.startsWith('https://') ? '📷 Photo' : payload.new.content,
+                body: newMsg.content?.startsWith('https://') ? '📷 Photo' : newMsg.content,
                 icon: FAVICON_SVG,
               });
             }
           }
 
           if (isMsgInCurrentActiveChat) {
-            markAsRead(payload.new.conversation_id);
+            markAsRead(convId);
           } else {
             setUnreadCounts((prev) => ({
               ...prev,
-              [payload.new.conversation_id]: (prev[payload.new.conversation_id] || 0) + 1,
+              [convId]: (prev[convId] || 0) + 1,
             }));
           }
         }
+
+        // Instantly reorder chat list
+        setConversations((prevConvs) => {
+          const targetIndex = prevConvs.findIndex(c => c.id === convId);
+          if (targetIndex === -1) {
+            fetchConversations(profile.id);
+            return prevConvs;
+          }
+          const target = prevConvs[targetIndex];
+          const updatedMsgs = [...(target.messages || []), newMsg];
+          const updatedConv = {
+            ...target,
+            messages: updatedMsgs,
+            latestMsgTime: new Date(newMsg.created_at).getTime()
+          };
+          const others = prevConvs.filter(c => c.id !== convId);
+          return [updatedConv, ...others].sort((a, b) => b.latestMsgTime - a.latestMsgTime);
+        });
+
         fetchConversations(profile.id);
       })
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'conversation_members' }, () => {
@@ -763,7 +817,14 @@ export default function App() {
 
   const fetchUsers = async (myId) => {
     const { data } = await supabase.from('profiles').select('*').neq('id', myId);
-    if (data) setAllUsers(data);
+    if (data) {
+      setAllUsers(data);
+      const seenMap = {};
+      data.forEach(u => {
+        if (u.last_seen) seenMap[u.id] = u.last_seen;
+      });
+      setUserLastSeen(prev => ({ ...prev, ...seenMap }));
+    }
   };
 
   const fetchFriendships = async (myId) => {
@@ -905,7 +966,7 @@ export default function App() {
 
     supabase
       .from('messages')
-      .select('*, profiles(id, username, avatar_url)')
+      .select('*, profiles(id, username, avatar_url), reply_to:messages!reply_to_id(*, profiles(id, username, avatar_url))')
       .eq('conversation_id', c.id)
       .order('created_at', { ascending: false })
       .range(0, 35)
@@ -1221,7 +1282,7 @@ export default function App() {
 
     const { data, error } = await supabase
       .from('messages')
-      .select('*, profiles(id, username, avatar_url)')
+      .select('*, profiles(id, username, avatar_url), reply_to:messages!reply_to_id(*, profiles(id, username, avatar_url))')
       .eq('conversation_id', activeConversation.id)
       .lt('created_at', oldestMsgCreatedAt)
       .order('created_at', { ascending: false })
@@ -1390,7 +1451,7 @@ export default function App() {
           content,
           reply_to_id: replyId,
         })
-        .select('*, profiles(username, avatar_url)')
+        .select('*, profiles(username, avatar_url), reply_to:messages!reply_to_id(*, profiles(id, username, avatar_url))')
         .single();
 
       if (error) throw error;
@@ -1878,43 +1939,54 @@ export default function App() {
       const readers = activeConvMembers.filter(
         (m) => m.user_id !== profile.id && m.last_read_at && new Date(m.last_read_at) >= new Date(msg.created_at)
       );
+      const deliveredMembers = activeConvMembers.filter(
+        (m) => m.user_id !== profile.id && getUserStatusType(m.user_id) === 'online'
+      );
 
-      if (readers.length === 0) {
+      if (readers.length > 0) {
+        return (
+          <span style={{ ...styles.statusMeta, color: '#53bdeb' }} title="Seen">
+            <CheckCheck size={14} color="#53bdeb" />
+          </span>
+        );
+      } else if (deliveredMembers.length > 0) {
+        return (
+          <span style={{ ...styles.statusMeta, color: '#8696a0' }} title="Delivered">
+            <CheckCheck size={14} color="#8696a0" />
+          </span>
+        );
+      } else {
         return (
           <span style={styles.statusMeta} title="Sent">
             <Check size={14} color="#8696a0" />
-            <span>Sent</span>
           </span>
         );
       }
-      const readerNames = readers.map((r) => getDisplayName(r.profiles) || 'Member').join(', ');
-      return (
-        <span 
-          style={{ ...styles.statusMeta, color: '#53bdeb' }} 
-          title={`Seen by: ${readerNames}`}>
-          <CheckCheck size={14} color="#53bdeb" />
-          <span style={{ color: '#53bdeb' }}>Seen by: {readerNames}</span>
-        </span>
-      );
     } else {
       const otherMem = activeConvMembers.find((m) => m.user_id !== profile.id);
+      const otherStat = otherUserId ? getUserStatusType(otherUserId) : 'offline';
       const isSeen = otherMem?.last_read_at && new Date(otherMem.last_read_at) >= new Date(msg.created_at);
+      const isDelivered = otherStat === 'online' || isSeen;
 
-      return (
-        <span style={{ ...styles.statusMeta, color: isSeen ? '#53bdeb' : '#8696a0' }}>
-          {isSeen ? (
-            <>
-              <CheckCheck size={15} color="#53bdeb" />
-              <span style={{ color: '#53bdeb', fontWeight: '700' }}>Seen</span>
-            </>
-          ) : (
-            <>
-              <Check size={15} color="#8696a0" />
-              <span style={{ color: '#8696a0' }}>Sent</span>
-            </>
-          )}
-        </span>
-      );
+      if (isSeen) {
+        return (
+          <span style={{ ...styles.statusMeta, color: '#53bdeb' }} title="Read">
+            <CheckCheck size={15} color="#53bdeb" />
+          </span>
+        );
+      } else if (isDelivered) {
+        return (
+          <span style={{ ...styles.statusMeta, color: '#8696a0' }} title="Delivered">
+            <CheckCheck size={15} color="#8696a0" />
+          </span>
+        );
+      } else {
+        return (
+          <span style={{ ...styles.statusMeta, color: '#8696a0' }} title="Sent">
+            <Check size={15} color="#8696a0" />
+          </span>
+        );
+      }
     }
   };
 
@@ -2739,7 +2811,7 @@ export default function App() {
                   const showQuickActions = isHovered || (isMobile && isTapped);
                   const isSelectedForBatch = selectedMessageIds.includes(m.id);
                   const msgReactions = reactions.filter((r) => r.message_id === m.id);
-                  const repliedMsg = m.reply_to_id ? (messages.find((x) => x.id === m.reply_to_id) || m.reply_to) : null;
+                  const repliedMsg = m.reply_to || (m.reply_to_id ? messages.find((x) => x.id === m.reply_to_id) : null);
 
                   const viewedByArr = m.viewed_by || [];
                   const hasAlreadyOpened = viewedByArr.includes(profile.id);
