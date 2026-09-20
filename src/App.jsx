@@ -422,7 +422,7 @@ export default function App() {
   const getDisplayName = (userObj) => {
     if (!userObj) return 'User';
     if (userObj.id && nicknames[userObj.id]) return nicknames[userObj.id];
-    return userObj.username || userObj.user_name || userObj.user_metadata?.user_name || userObj.email?.split('@')[0] || 'User';
+    return userObj.username || userObj.user_name || userObj.email?.split('@')[0] || 'User';
   };
 
   useEffect(() => {
@@ -696,7 +696,7 @@ export default function App() {
 
           const { data: senderInfo } = await supabase
             .from('profiles')
-            .select('id, username, avatar_url, user_metadata')
+            .select('id, username, avatar_url')
             .eq('id', newMsg.sender_id)
             .single();
 
@@ -993,7 +993,7 @@ export default function App() {
 
     supabase
       .from('messages')
-      .select('*, profiles(id, username, avatar_url, user_metadata)')
+      .select('*, profiles(id, username, avatar_url)')
       .eq('conversation_id', c.id)
       .order('created_at', { ascending: false })
       .range(0, 35)
@@ -1207,7 +1207,7 @@ export default function App() {
   const loadActiveMembers = async (convId) => {
     const { data } = await supabase
       .from('conversation_members')
-      .select('conversation_id, user_id, hidden_at, last_read_at, profiles(id, username, avatar_url, user_metadata)')
+      .select('conversation_id, user_id, hidden_at, last_read_at, profiles(id, username, avatar_url)')
       .eq('conversation_id', convId);
     if (data) setActiveConvMembers([...data]);
   };
@@ -1219,7 +1219,7 @@ export default function App() {
     }
     const { data } = await supabase
       .from('message_reactions')
-      .select('*, profiles(id, username, avatar_url, user_metadata)')
+      .select('*, profiles(id, username, avatar_url)')
       .in('message_id', msgIds);
     if (data) setReactions(data);
   };
@@ -1239,7 +1239,7 @@ export default function App() {
             if (!payload.new.is_deleted_for_everyone && !payload.new.deleted_for?.includes(profile.id)) {
               const { data: senderProfile } = await supabase
                 .from('profiles')
-                .select('id, username, avatar_url, user_metadata')
+                .select('id, username, avatar_url')
                 .eq('id', payload.new.sender_id)
                 .single();
 
@@ -1309,7 +1309,7 @@ export default function App() {
 
     const { data, error } = await supabase
       .from('messages')
-      .select('*, profiles(id, username, avatar_url, user_metadata)')
+      .select('*, profiles(id, username, avatar_url)')
       .eq('conversation_id', activeConversation.id)
       .lt('created_at', oldestMsgCreatedAt)
       .order('created_at', { ascending: false })
@@ -1478,7 +1478,7 @@ export default function App() {
           content,
           reply_to_id: replyId,
         })
-        .select('*, profiles(id, username, avatar_url, user_metadata)')
+        .select('*, profiles(id, username, avatar_url)')
         .single();
 
       if (error) throw error;
