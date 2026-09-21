@@ -1144,11 +1144,22 @@ export default function App() {
     const { data } = await supabase.from('profiles').select('*').neq('id', myId);
     if (data) {
       setAllUsers(data);
-      const seenMap = {};
-      data.forEach(u => {
-        if (u.last_seen) seenMap[u.id] = u.last_seen;
+      setUserLastSeen(prev => {
+        const next = { ...prev };
+        data.forEach(u => {
+          if (!u.last_seen) return;
+          const existing = next[u.id];
+          // Only adopt the DB value if it's actually newer than what we
+          // already have from live presence — the DB write lags a few
+          // seconds behind the real-time heartbeat, so blindly overwriting
+          // here could regress an accurate "online"/"just now" status back
+          // to a stale timestamp.
+          if (!existing || new Date(u.last_seen).getTime() > new Date(existing).getTime()) {
+            next[u.id] = u.last_seen;
+          }
+        });
+        return next;
       });
-      setUserLastSeen(prev => ({ ...prev, ...seenMap }));
     }
   };
 
@@ -1293,12 +1304,19 @@ export default function App() {
     fetchConversations(profile.id);
   };
 
+  const MESSAGES_PAGE_SIZE = 30;
+
   const handleSelectConversation = (c) => {
     if (activeConversation?.id === c.id) return;
     setActiveConversation(c);
     setTypingUsers({});
     setSelectedMessageIds([]);
     setMessages(messagesCache[c.id] || []);
+    // Reset pagination state for the newly opened conversation — otherwise
+    // a stale true/false value from the previously open chat could hide or
+    // wrongly show the "tap for older messages" affordance here.
+    setHasMoreMessages(false);
+    setLoadingOlderMessages(false);
     markAsRead(c.id);
 
     supabase
@@ -1306,14 +1324,17 @@ export default function App() {
       .select('*, profiles(id, username, avatar_url)')
       .eq('conversation_id', c.id)
       .order('created_at', { ascending: false })
-      .range(0, 35)
+      .range(0, MESSAGES_PAGE_SIZE) // fetches one extra row so we can tell if older history exists
       .then(({ data }) => {
         if (data) {
-          const sorted = data.reverse();
+          const moreHistoryExists = data.length > MESSAGES_PAGE_SIZE;
+          const pageRows = moreHistoryExists ? data.slice(0, MESSAGES_PAGE_SIZE) : data;
+          const sorted = pageRows.reverse();
           const visible = sorted.filter((m) => !m.is_deleted_for_everyone && !m.deleted_for?.includes(profile.id));
           setMessagesCache((cache) => ({ ...cache, [c.id]: visible }));
           if (activeConversationRef.current?.id === c.id) {
             setMessages(visible);
+            setHasMoreMessages(moreHistoryExists);
             setTimeout(() => scrollToBottom('auto'), 20);
           }
           fetchActiveConvReactions(visible.map((m) => m.id));
@@ -1425,7 +1446,14 @@ export default function App() {
   };
 
   const createGroupChat = async () => {
-    if (!groupName.trim() || selectedGroupUsers.length === 0) return;
+    if (!groupName.trim()) {
+      alert('Please enter a group name before creating the group.');
+      return;
+    }
+    if (selectedGroupUsers.length === 0) {
+      alert('Please select at least one friend to add to the group.');
+      return;
+    }
 
     // Generate the conversation id ourselves instead of relying on a
     // select-back after insert. The previous approach (insert then
@@ -1766,7 +1794,7 @@ export default function App() {
       .eq('conversation_id', activeConversation.id)
       .lt('created_at', oldestMsgCreatedAt)
       .order('created_at', { ascending: false })
-      .limit(30);
+      .limit(MESSAGES_PAGE_SIZE);
 
     if (!error && data && data.length > 0) {
       const olderSorted = data.reverse();
@@ -1781,7 +1809,7 @@ export default function App() {
         setMessagesCache((cache) => ({ ...cache, [activeConversation.id]: updated }));
         return updated;
       });
-      setHasMoreMessages(data.length === 30);
+      setHasMoreMessages(data.length === MESSAGES_PAGE_SIZE);
       fetchActiveConvReactions(visibleOlder.map((m) => m.id));
 
       setTimeout(() => {
@@ -2271,19 +2299,58 @@ export default function App() {
     }
   };
 
-  const handleDeleteChat = async () => {
+  const handleClearAllChatMessages = async () => {
     if (!activeConversation) return;
-    if (!window.confirm('Delete this chat from your list? (Reappears upon new messages)')) return;
+    if (!window.confirm('Clear all messages in this chat? This removes every message from your view (the chat itself stays, and this cannot be undone).')) return;
 
     const convId = activeConversation.id;
-    setActiveConversation(null);
+
+    // Clear the visible chat immediately for a snappy feel.
+    setMessages([]);
+    setMessagesCache((cache) => ({ ...cache, [convId]: [] }));
+    setSelectedMessageIds([]);
+    setHasMoreMessages(false);
+
+    try {
+      // Fetch every message id in the full history (not just the currently
+      // loaded page) so "clear" really means all of it, including messages
+      // older than what's paginated into view.
+      const { data: allMsgs, error: fetchErr } = await supabase
+        .from('messages')
+        .select('id, deleted_for')
+        .eq('conversation_id', convId);
+      if (fetchErr) throw fetchErr;
+
+      await Promise.all(
+        (allMsgs || []).map((m) => {
+          const updatedDeletedFor = Array.from(new Set([...(m.deleted_for || []), profile.id]));
+          return supabase.from('messages').update({ deleted_for: updatedDeletedFor }).eq('id', m.id);
+        })
+      );
+    } catch (err) {
+      alert('Some messages may not have been fully cleared: ' + (err?.message || 'Unknown error. Please check your connection and try again.'));
+    }
+
+    fetchConversations(profile.id);
+  };
+
+  // Hides a conversation from the sidebar list (from outside the chat, via
+  // the chat row's "⋮" dropdown) without deleting any messages — the
+  // existing on_message_unhide_conversation DB trigger automatically brings
+  // it back the moment a new message arrives, complete with its history.
+  const handleDeleteChatFromList = async (convId, e) => {
+    if (e) e.stopPropagation();
+    setChatDropdownOpenId(null);
+    if (!window.confirm('Delete this chat from your list? It will reappear (with its messages) if a new message arrives.')) return;
+
+    if (activeConversationRef.current?.id === convId) setActiveConversation(null);
 
     setConversations((prev) =>
       prev.map((c) => {
         if (c.id === convId) {
           return {
             ...c,
-            conversation_members: c.conversation_members.map((m) =>
+            conversation_members: (c.conversation_members || []).map((m) =>
               m.user_id === profile.id ? { ...m, hidden_at: new Date().toISOString() } : m
             ),
           };
@@ -2292,11 +2359,15 @@ export default function App() {
       })
     );
 
-    await supabase
+    const { error } = await supabase
       .from('conversation_members')
       .update({ hidden_at: new Date().toISOString() })
       .eq('conversation_id', convId)
       .eq('user_id', profile.id);
+
+    if (error) {
+      alert('Failed to delete chat: ' + error.message);
+    }
 
     fetchConversations(profile.id);
   };
@@ -3013,17 +3084,23 @@ export default function App() {
                       : null;
                     const chatTimestamp = formatChatTimestamp(latestMsg?.created_at || c.created_at);
                      
+                    const latestMsgSenderProfile = latestMsg
+                      ? c.conversation_members?.find((m) => m.user_id === latestMsg.sender_id)?.profiles
+                      : null;
+                    const latestMsgSenderLabel = latestMsg
+                      ? (latestMsg.sender_id === profile?.id ? 'You' : (c.is_group ? (getDisplayName(latestMsgSenderProfile) || 'Member') : null))
+                      : null;
+                    const latestMsgPreviewText = latestMsg
+                      ? `${latestMsgSenderLabel ? latestMsgSenderLabel + ': ' : ''}${getMessagePreviewLabel(latestMsg.content)}`
+                      : (c.is_group ? 'No messages yet' : 'Say hi 👋 to start chatting');
+
                     const subLabel = isTypingNow && !rowIsDeleted 
                       ? (c.is_group ? `${isTypingNow} is typing...` : 'typing...')
-                      : c.is_group 
-                        ? `${c.conversation_members?.length || 0} members` 
-                        : rowIsDeleted 
-                          ? 'Account removed' 
-                          : rowIsUnfriended 
-                            ? 'Unfriended' 
-                            : statusType === 'online' 
-                              ? '● Online' 
-                              : formatLastSeen(userLastSeen[cUserId]);
+                      : rowIsDeleted 
+                        ? 'Account removed' 
+                        : rowIsUnfriended 
+                          ? 'Unfriended' 
+                          : latestMsgPreviewText;
 
                     return (
                       <div
@@ -3065,7 +3142,7 @@ export default function App() {
                           </div>
                            
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '2px' }}>
-                            <span style={{ ...styles.chatRowSub, color: isTypingNow ? '#00a884' : statusType === 'online' ? '#00a884' : '#667781' }}>
+                            <span style={{ ...styles.chatRowSub, color: isTypingNow ? '#00a884' : '#667781' }}>
                               {subLabel}
                             </span>
                             {chatUnread > 0 && (
@@ -3094,6 +3171,12 @@ export default function App() {
                                 style={styles.dropdownOptionBtn}
                               >
                                 <Archive size={14} /> Archive Chat
+                              </button>
+                              <button
+                                onClick={(e) => handleDeleteChatFromList(c.id, e)}
+                                style={{ ...styles.dropdownOptionBtn, color: '#dc2626' }}
+                              >
+                                <Trash2 size={14} /> Delete Chat
                               </button>
                             </div>
                           )}
@@ -3367,12 +3450,12 @@ export default function App() {
                   )}
 
                   <button
-                    onClick={handleDeleteChat}
+                    onClick={handleClearAllChatMessages}
                     style={styles.clearChatBtn}
-                    title="Delete this chat from your list"
+                    title="Delete all messages in this chat"
                   >
                     <Trash2 size={17} color="#ef4444" />
-                    {!isMobile && <span>Delete Chat</span>}
+                    {!isMobile && <span>Clear All Chat</span>}
                   </button>
                 </div>
               </div>
@@ -3703,7 +3786,15 @@ export default function App() {
                             }}>
                               <button 
                                 data-floating-ui="reaction-picker-trigger"
-                                onClick={(e) => { e.stopPropagation(); setActiveReactionPickerMsgId(activeReactionPickerMsgId === m.id ? null : m.id); }} 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const isOpeningSameMessage = activeReactionPickerMsgId === m.id;
+                                  setActiveReactionPickerMsgId(isOpeningSameMessage ? null : m.id);
+                                  // Always reset the extended grid when the picker's target message
+                                  // changes — otherwise it can stay stuck open from whichever
+                                  // message it was last opened on, showing the wrong content.
+                                  setShowExtendedReactions(false);
+                                }} 
                                 style={styles.quickIconBtn} 
                                 title="React">
                                 <Smile size={14} />
