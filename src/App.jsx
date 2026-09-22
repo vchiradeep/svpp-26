@@ -309,6 +309,7 @@ export default function App() {
 
   // Media Gallery state
   const [showMediaGalleryModal, setShowMediaGalleryModal] = useState(false);
+  const [galleryMedia, setGalleryMedia] = useState({ images: [], audios: [], links: [], loading: false });
    
   const lastTypingBroadcastTimeRef = useRef(0);
   const typingStopTimerRef = useRef(null);
@@ -445,6 +446,9 @@ export default function App() {
         setShowForwardModal(false);
         setShowMediaGalleryModal(false);
         setOpenMessageMenuId(null);
+        setActiveReactionPickerMsgId(null);
+        setShowExtendedReactions(false);
+        setChatDropdownOpenId(null);
         setProfilePreviewTarget(null);
         setReactionDetailsTarget(null);
         setPendingImageUpload(null);
@@ -664,6 +668,26 @@ export default function App() {
       [data-floating-ui="message-options-menu"],
       [data-floating-ui="chat-dots-menu"] {
         animation: floatingMenuPop 0.14s ease-out;
+      }
+
+      /* Glowing green online indicator — used instead of literal
+         "online"/"offline" text wherever a presence status is shown. */
+      @keyframes onlineDotGlowPulse {
+        0%, 100% { box-shadow: 0 0 0 0 rgba(37, 211, 102, 0.55); }
+        50% { box-shadow: 0 0 0 5px rgba(37, 211, 102, 0); }
+      }
+      .online-glow-dot {
+        animation: onlineDotGlowPulse 1.8s ease-out infinite;
+      }
+
+      /* Smooth fade-in for modal/lightbox backdrops instead of an instant
+         snap-into-existence. */
+      @keyframes modalBackdropFadeIn {
+        from { opacity: 0; }
+        to { opacity: 1; }
+      }
+      .modal-fade-in {
+        animation: modalBackdropFadeIn 0.16s ease-out;
       }
     `;
     document.head.appendChild(styleTag);
@@ -1705,6 +1729,54 @@ export default function App() {
     if (data) setReactions(data);
   };
 
+  // The Media Gallery previously read from the paginated `messages` state,
+  // so anything shared before the currently-loaded page (older than ~30
+  // messages back) simply never showed up — it looked like media "wasn't
+  // being stored" when it was actually just out of view. This fetches the
+  // FULL message history for the conversation straight from the DB instead.
+  const fetchConversationMediaGallery = async (convId) => {
+    if (!convId || !profile?.id) return;
+    setGalleryMedia({ images: [], audios: [], links: [], loading: true });
+
+    const { data, error } = await supabase
+      .from('messages')
+      .select('id, content, sender_id, created_at, is_deleted_for_everyone, deleted_for')
+      .eq('conversation_id', convId)
+      .order('created_at', { ascending: false });
+
+    if (error || !data) {
+      setGalleryMedia({ images: [], audios: [], links: [], loading: false });
+      return;
+    }
+
+    const visible = data.filter(
+      (m) => !m.is_deleted_for_everyone && !(Array.isArray(m.deleted_for) && m.deleted_for.includes(profile.id))
+    );
+
+    const images = [];
+    const audios = [];
+    const links = [];
+    const urlRegex = /(https?:\/\/[^\s]+)/g;
+
+    visible.forEach((m) => {
+      const kind = getMessageKind(m.content);
+      if (kind === 'image') {
+        images.push({ id: m.id, url: m.content.replace('[IMAGE]:', ''), created_at: m.created_at });
+      } else if (kind === 'audio') {
+        audios.push({ id: m.id, url: m.content.replace('[AUDIO]:', ''), created_at: m.created_at });
+      } else if (kind === 'text' && m.content) {
+        const foundUrls = m.content.match(urlRegex);
+        if (foundUrls) {
+          foundUrls.forEach((url) => links.push({ id: `${m.id}-${url}`, url, created_at: m.created_at }));
+        }
+      } else if (kind === 'youtube') {
+        links.push({ id: m.id, url: m.content.trim(), created_at: m.created_at });
+      }
+    });
+
+    setGalleryMedia({ images, audios, links, loading: false });
+  };
+
   useEffect(() => {
     if (!activeConversation) return;
 
@@ -1910,7 +1982,6 @@ export default function App() {
       setOpenMessageMenuId(null);
       setActiveReactionPickerMsgId(null);
       setShowExtendedReactions(false);
-      setChatDropdownOpenId(null);
     };
     document.addEventListener('mousedown', handleGlobalPointerDownCloseMenus, true);
     document.addEventListener('touchstart', handleGlobalPointerDownCloseMenus, true);
@@ -2148,10 +2219,22 @@ export default function App() {
       setMessagesCache((cache) => ({ ...cache, [activeConversation.id]: updated }));
       return updated;
     });
-    await supabase
+    const { error: viewOnceUpdateError } = await supabase
       .from('messages')
       .update({ viewed_by: updatedViewedBy })
       .eq('id', msg.id);
+
+    if (viewOnceUpdateError) {
+      // If this fails, the "viewed" state never actually persists — the
+      // photo would silently become re-viewable again after a refresh, with
+      // no indication anything went wrong. Surface it clearly instead.
+      alert(
+        'Could not mark this photo as viewed: ' + viewOnceUpdateError.message +
+        (String(viewOnceUpdateError.message || '').toLowerCase().includes('column')
+          ? '\n\nYour messages table is likely missing the viewed_by column — see the SQL note provided separately.'
+          : '\n\nThis photo may become viewable again after a refresh until this is fixed.')
+      );
+    }
   };
 
   const handleVotePoll = async (msgId, optIndex) => {
@@ -2708,6 +2791,20 @@ export default function App() {
     }, 50);
   };
 
+  const renderGlowingOnlineDot = () => (
+    <span
+      className="online-glow-dot"
+      style={{
+        display: 'inline-block',
+        width: '9px',
+        height: '9px',
+        borderRadius: '50%',
+        backgroundColor: '#25d366',
+      }}
+      title="Online"
+    />
+  );
+
   const renderAvatar = (avatarUrl, fallbackText, size = 44, isSquare = false, statusType = 'offline', extraData = null, isGroupMember = false) => {
     const isDeletedUser = fallbackText === 'Account deleted';
     const displayName = isDeletedUser ? 'Account deleted' : (fallbackText || 'U');
@@ -2767,6 +2864,7 @@ export default function App() {
         )}
         {!isDeletedUser && !isGroupMember && (
           <div
+            className={statusType === 'online' ? 'online-glow-dot' : undefined}
             style={{
               position: 'absolute',
               bottom: '0',
@@ -2921,7 +3019,7 @@ export default function App() {
   const isCurrentChatTyping = typingUserList.length > 0;
 
   return (
-    <div style={styles.appContainer} onClick={() => setOpenMessageMenuId(null)}>
+    <div style={styles.appContainer} onClick={() => { setOpenMessageMenuId(null); setChatDropdownOpenId(null); }}>
        
       {snapchatBanner && (
         <div 
@@ -3207,7 +3305,7 @@ export default function App() {
                           {renderAvatar(u.avatar_url, fname, 40, false, statusType, { userProfile: u })}
                           <div>
                             <div style={styles.userName}>{fname}</div>
-                            <div style={styles.userEmail}>{statusType === 'online' ? '● Online' : formatLastSeen(userLastSeen[u.id])}</div>
+                            <div style={styles.userEmail}>{statusType === 'online' ? renderGlowingOnlineDot() : formatLastSeen(userLastSeen[u.id])}</div>
                           </div>
                         </div>
 
@@ -3261,7 +3359,7 @@ export default function App() {
                           {renderAvatar(u.avatar_url, uname, 40, false, statusType, { userProfile: u })}
                           <div>
                             <div style={styles.userName}>{uname}</div>
-                            <div style={styles.userEmail}>{statusType === 'online' ? '● Online' : formatLastSeen(userLastSeen[u.id])}</div>
+                            <div style={styles.userEmail}>{statusType === 'online' ? renderGlowingOnlineDot() : formatLastSeen(userLastSeen[u.id])}</div>
                           </div>
                         </div>
 
@@ -3346,6 +3444,7 @@ export default function App() {
                       setShowGroupInfoModal(true);
                     } else {
                       setShowMediaGalleryModal(true);
+                      fetchConversationMediaGallery(activeConversation.id);
                     }
                   }}
                   style={{ ...styles.windowHeaderInfo, cursor: 'pointer' }}
@@ -3395,7 +3494,7 @@ export default function App() {
                             ? 'Account removed' 
                             : isUnfriended 
                               ? 'Unfriended' 
-                              : (otherStatusType === 'online' ? <span style={{ color: '#00a884', fontWeight: '700' }}>● online</span> : formatLastSeen(userLastSeen[otherUserId]))}
+                              : (otherStatusType === 'online' ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>{renderGlowingOnlineDot()} <span style={{ color: '#00a884', fontWeight: '700' }}>online</span></span> : formatLastSeen(userLastSeen[otherUserId]))}
                       </span>
                     )}
                   </div>
@@ -3403,7 +3502,7 @@ export default function App() {
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <button
-                    onClick={() => setShowMediaGalleryModal(true)}
+                    onClick={() => { setShowMediaGalleryModal(true); fetchConversationMediaGallery(activeConversation.id); }}
                     style={styles.pollHeaderBtn}
                     title="View Shared Media & Links"
                   >
@@ -3569,10 +3668,13 @@ export default function App() {
                         onMouseEnter={() => setHoveredMessageId(m.id)}
                         onMouseLeave={() => {
                           setHoveredMessageId(null);
-                          if (activeReactionPickerMsgId === m.id) {
-                            setActiveReactionPickerMsgId(null);
-                            setShowExtendedReactions(false);
-                          }
+                          // Intentionally NOT closing the reaction picker here.
+                          // It opens on click, so it should close on click
+                          // (elsewhere) too — not on hover-out. The popup and
+                          // its extended emoji grid render as separate floating
+                          // boxes above the row; moving the cursor between them
+                          // genuinely passes outside the row's hover area for a
+                          // moment, which was closing the picker mid-hover.
                         }}
                         onClick={(e) => {
                           e.stopPropagation();
@@ -4099,7 +4201,7 @@ export default function App() {
 
       {/* MEDIA GALLERY MODAL */}
       {showMediaGalleryModal && activeConversation && (
-        <div style={styles.modalBackdrop} onClick={() => setShowMediaGalleryModal(false)}>
+        <div className="modal-fade-in" style={styles.modalBackdrop} onClick={() => setShowMediaGalleryModal(false)}>
           <div style={{ ...styles.modalBox, maxWidth: '520px' }} onClick={(e) => e.stopPropagation()}>
             <div style={styles.modalHead}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -4111,28 +4213,77 @@ export default function App() {
             <p style={{ fontSize: '13px', color: '#667781', margin: '0 0 12px' }}>
               Photos, voice notes, and links shared in this conversation:
             </p>
-            <div style={{ ...styles.modalScrollList, maxHeight: '320px' }}>
-              {messages.filter(m => getMessageKind(m.content) === 'image' || getMessageKind(m.content) === 'audio').length === 0 ? (
+            <div style={{ ...styles.modalScrollList, maxHeight: '360px' }}>
+              {galleryMedia.loading ? (
+                <div style={{ padding: '24px', textAlign: 'center', color: '#8696a0', fontSize: '14px' }}>
+                  Loading shared media…
+                </div>
+              ) : (galleryMedia.images.length === 0 && galleryMedia.audios.length === 0 && galleryMedia.links.length === 0) ? (
                 <div style={{ padding: '24px', textAlign: 'center', color: '#8696a0', fontSize: '14px' }}>
                   No media shared in this chat yet.
                 </div>
               ) : (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
-                  {messages.filter(m => getMessageKind(m.content) === 'image').map(m => {
-                    const imgUrl = m.content.replace('[IMAGE]:', '');
-                    return (
-                      <img
-                        key={m.id}
-                        src={imgUrl}
-                        alt="Shared media"
-                        onClick={() => {
-                          setPreviewImage({ src: imgUrl, title: 'Shared Photo' });
-                          setShowMediaGalleryModal(false);
-                        }}
-                        style={{ width: '100%', height: '100px', objectFit: 'cover', borderRadius: '8px', cursor: 'pointer' }}
-                      />
-                    );
-                  })}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                  {galleryMedia.images.length > 0 && (
+                    <div>
+                      <div style={{ fontSize: '12px', fontWeight: '700', color: '#54656f', marginBottom: '8px' }}>
+                        Photos ({galleryMedia.images.length})
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
+                        {galleryMedia.images.map(item => (
+                          <img
+                            key={item.id}
+                            src={item.url}
+                            alt="Shared media"
+                            onClick={() => {
+                              setPreviewImage({ src: item.url, title: 'Shared Photo' });
+                              setShowMediaGalleryModal(false);
+                            }}
+                            style={{ width: '100%', height: '100px', objectFit: 'cover', borderRadius: '8px', cursor: 'pointer' }}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {galleryMedia.audios.length > 0 && (
+                    <div>
+                      <div style={{ fontSize: '12px', fontWeight: '700', color: '#54656f', marginBottom: '8px' }}>
+                        Voice notes ({galleryMedia.audios.length})
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                        {galleryMedia.audios.map(item => (
+                          <div key={item.id} style={styles.modalFriendRow}>
+                            <Mic size={16} color="#00a884" />
+                            <audio controls src={item.url} style={{ flex: 1, height: '32px' }} />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {galleryMedia.links.length > 0 && (
+                    <div>
+                      <div style={{ fontSize: '12px', fontWeight: '700', color: '#54656f', marginBottom: '8px' }}>
+                        Links ({galleryMedia.links.length})
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                        {galleryMedia.links.map(item => (
+                          <a
+                            key={item.id}
+                            href={item.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="hover-dim"
+                            style={{ ...styles.modalFriendRow, textDecoration: 'none', color: '#0284c7', fontSize: '13px', wordBreak: 'break-all' }}
+                          >
+                            <ExternalLink size={15} color="#0284c7" style={{ flexShrink: 0 }} />
+                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.url}</span>
+                          </a>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -4145,7 +4296,7 @@ export default function App() {
 
       {/* FORWARD MESSAGE MODAL */}
       {showForwardModal && forwardingMessage && (
-        <div style={styles.modalBackdrop} onClick={() => setShowForwardModal(false)}>
+        <div className="modal-fade-in" style={styles.modalBackdrop} onClick={() => setShowForwardModal(false)}>
           <div style={styles.modalBox} onClick={(e) => e.stopPropagation()}>
             <div style={styles.modalHead}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -4187,7 +4338,7 @@ export default function App() {
 
       {/* REACTION DETAILS MODAL */}
       {reactionDetailsTarget && (
-        <div style={styles.modalBackdrop} onClick={() => setReactionDetailsTarget(null)}>
+        <div className="modal-fade-in" style={styles.modalBackdrop} onClick={() => setReactionDetailsTarget(null)}>
           <div style={styles.modalBox} onClick={(e) => e.stopPropagation()}>
             <div style={styles.modalHead}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -4225,7 +4376,7 @@ export default function App() {
 
       {/* CREATE POLL MODAL */}
       {showPollModal && (
-        <div style={styles.modalBackdrop} onClick={() => setShowPollModal(false)}>
+        <div className="modal-fade-in" style={styles.modalBackdrop} onClick={() => setShowPollModal(false)}>
           <div style={styles.modalBox} onClick={(e) => e.stopPropagation()}>
             <div style={styles.modalHead}>
               <h4 style={{ margin: 0, fontSize: '18px', color: '#111b21' }}>Create Group Poll</h4>
@@ -4274,7 +4425,7 @@ export default function App() {
 
       {/* NICKNAME MODAL */}
       {showNicknameModal && nicknameTargetUser && (
-        <div style={styles.modalBackdrop} onClick={() => setShowNicknameModal(false)}>
+        <div className="modal-fade-in" style={styles.modalBackdrop} onClick={() => setShowNicknameModal(false)}>
           <div style={styles.modalBox} onClick={(e) => e.stopPropagation()}>
             <div style={styles.modalHead}>
               <h4 style={{ margin: 0, fontSize: '18px', color: '#111b21' }}>
@@ -4303,7 +4454,7 @@ export default function App() {
 
       {/* ARCHIVE PIN MODAL */}
       {showArchiveModal && (
-        <div style={styles.modalBackdrop} onClick={() => setShowArchiveModal(false)}>
+        <div className="modal-fade-in" style={styles.modalBackdrop} onClick={() => setShowArchiveModal(false)}>
           <div style={styles.modalBox} onClick={(e) => e.stopPropagation()}>
             <div style={styles.modalHead}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -4376,7 +4527,7 @@ export default function App() {
 
       {/* VIEW ONCE CONFIRMATION MODAL */}
       {pendingImageUpload && (
-        <div style={styles.lightboxBackdrop} onClick={() => setPendingImageUpload(null)}>
+        <div className="modal-fade-in" style={styles.lightboxBackdrop} onClick={() => setPendingImageUpload(null)}>
           <div style={styles.viewOnceModalBox} onClick={(e) => e.stopPropagation()}>
             <div style={styles.modalHead}>
               <h4 style={{ margin: 0, fontSize: '17px', color: '#111b21' }}>Send Photo</h4>
@@ -4406,7 +4557,7 @@ export default function App() {
 
       {/* OPEN VIEW ONCE LIGHTBOX */}
       {viewOnceViewerData && (
-        <div style={styles.lightboxBackdrop} onClick={() => setViewOnceViewerData(null)}>
+        <div className="modal-fade-in" style={styles.lightboxBackdrop} onClick={() => setViewOnceViewerData(null)}>
           <div style={styles.lightboxContainer} onClick={(e) => e.stopPropagation()}>
             <div style={styles.lightboxHeader}>
               <span style={{ color: '#fff', fontWeight: '600', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -4428,6 +4579,7 @@ export default function App() {
       {/* META AI ASSISTANT MODAL */}
       {showAiModal && (
         <div 
+          className="modal-fade-in"
           style={{
             ...styles.lightboxBackdrop,
             padding: isMobile ? '0' : '20px'
@@ -4533,7 +4685,7 @@ export default function App() {
       )}
 
       {profilePreviewTarget && (
-        <div style={styles.lightboxBackdrop} onClick={() => setProfilePreviewTarget(null)}>
+        <div className="modal-fade-in" style={styles.lightboxBackdrop} onClick={() => setProfilePreviewTarget(null)}>
           <div style={styles.profilePopoverBox} onClick={(e) => e.stopPropagation()}>
             <div style={styles.profilePopoverHead}>
               <span style={{ fontWeight: '700', fontSize: '16px', color: '#111b21' }}>
@@ -4592,7 +4744,7 @@ export default function App() {
       )}
 
       {previewImage && (
-        <div style={styles.lightboxBackdrop} onClick={() => setPreviewImage(null)}>
+        <div className="modal-fade-in" style={styles.lightboxBackdrop} onClick={() => setPreviewImage(null)}>
           <div style={styles.lightboxContainer} onClick={(e) => e.stopPropagation()}>
             <div style={styles.lightboxHeader}>
               <span style={{ color: '#fff', fontWeight: '600', fontSize: '14px' }}>
@@ -4608,7 +4760,7 @@ export default function App() {
       )}
 
       {showGroupInfoModal && activeConversation?.is_group && (
-        <div style={styles.modalBackdrop}>
+        <div className="modal-fade-in" style={styles.modalBackdrop}>
           <div style={styles.modalBox}>
             <div style={styles.modalHead}>
               <h4 style={{ margin: 0, fontSize: '18px' }}>Group Info</h4>
@@ -4776,7 +4928,7 @@ export default function App() {
       )}
 
       {showNewChatModal && (
-        <div style={styles.modalBackdrop}>
+        <div className="modal-fade-in" style={styles.modalBackdrop}>
           <div style={styles.modalBox}>
             <div style={styles.modalHead}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -4807,7 +4959,7 @@ export default function App() {
                       {renderAvatar(f.avatar_url, fname, 38, false, getUserStatusType(f.id), { userProfile: f })}
                       <div style={{ flex: 1 }}>
                         <div style={{ fontWeight: '700', fontSize: '14px', color: '#111b21' }}>{fname}</div>
-                        <div style={{ fontSize: '12px', color: '#667781' }}>{getUserStatusType(f.id) === 'online' ? '● Online' : formatLastSeen(userLastSeen[f.id])}</div>
+                        <div style={{ fontSize: '12px', color: '#667781' }}>{getUserStatusType(f.id) === 'online' ? renderGlowingOnlineDot() : formatLastSeen(userLastSeen[f.id])}</div>
                       </div>
                       <button style={styles.openChatBtn}>Chat</button>
                     </div>
@@ -4824,7 +4976,7 @@ export default function App() {
       )}
 
       {showAddMemberModal && activeConversation?.is_group && (
-        <div style={styles.modalBackdrop}>
+        <div className="modal-fade-in" style={styles.modalBackdrop}>
           <div style={styles.modalBox}>
             <div style={styles.modalHead}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -4851,7 +5003,7 @@ export default function App() {
                       {renderAvatar(friend.avatar_url, frName, 38, false, getUserStatusType(friend.id), { userProfile: friend })}
                       <div style={{ flex: 1 }}>
                         <div style={{ fontWeight: '700', fontSize: '14px', color: '#111b21' }}>{frName}</div>
-                        <div style={{ fontSize: '12px', color: '#667781' }}>{getUserStatusType(friend.id) === 'online' ? '● Online' : formatLastSeen(userLastSeen[friend.id])}</div>
+                        <div style={{ fontSize: '12px', color: '#667781' }}>{getUserStatusType(friend.id) === 'online' ? renderGlowingOnlineDot() : formatLastSeen(userLastSeen[friend.id])}</div>
                       </div>
                       <button onClick={() => handleAddMemberToExistingGroup(friend.id)} style={styles.openChatBtn}>
                         Add
@@ -4870,7 +5022,7 @@ export default function App() {
       )}
 
       {showGroupModal && (
-        <div style={styles.modalBackdrop}>
+        <div className="modal-fade-in" style={styles.modalBackdrop}>
           <div style={styles.modalBox}>
             <div style={styles.modalHead}>
               <h4 style={{ margin: 0, fontSize: '18px' }}>Create Group Chat</h4>
@@ -4911,7 +5063,7 @@ export default function App() {
       )}
 
       {showSettingsModal && (
-        <div style={styles.modalBackdrop}>
+        <div className="modal-fade-in" style={styles.modalBackdrop}>
           <div style={styles.modalBox}>
             <div style={styles.modalHead}>
               <h4 style={{ margin: 0, fontSize: '18px' }}>Settings & Customization</h4>
