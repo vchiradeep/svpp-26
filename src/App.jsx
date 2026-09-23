@@ -866,20 +866,29 @@ export default function App() {
     const updatePresence = async (isOnline) => {
       const nowMs = Date.now();
       const now = new Date(nowMs).toISOString();
-      if (nowMs - lastDbWriteAt >= PRESENCE_DB_WRITE_INTERVAL_MS) {
-        lastDbWriteAt = nowMs;
-        try {
-          await supabase
-            .from('profiles')
-            .update({ last_seen: now })
-            .eq('id', profile.id);
-        } catch (err) {}
-      }
 
+      // track() goes out over the already-open realtime socket FIRST and is
+      // never awaited on anything else — this is the message that actually
+      // flips the green dot for everyone else, so it has to fire the instant
+      // the tab is opened/focused, not after a REST round-trip has finished.
+      // Waiting on the DB write before this (the old behaviour) is exactly
+      // what made "online" feel slow/missing right when a tab was opened.
       presenceChannel.track({
         online_at: now,
         isOnline: isOnline,
       });
+
+      if (nowMs - lastDbWriteAt >= PRESENCE_DB_WRITE_INTERVAL_MS) {
+        lastDbWriteAt = nowMs;
+        // Fire-and-forget: last_seen is only ever read once a user is
+        // already offline, so this write must never block presence.track()
+        // above, which is the one thing that has to be fast.
+        supabase
+          .from('profiles')
+          .update({ last_seen: now })
+          .eq('id', profile.id)
+          .then(() => {}, () => {});
+      }
     };
 
     presenceChannel
