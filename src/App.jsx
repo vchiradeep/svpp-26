@@ -279,6 +279,7 @@ export default function App() {
   const [enteredArchivePin, setEnteredArchivePin] = useState('');
   const [isArchiveUnlocked, setIsArchiveUnlocked] = useState(false);
   const [chatDropdownOpenId, setChatDropdownOpenId] = useState(null);
+  const [chatDropdownPos, setChatDropdownPos] = useState({ top: 0, right: 0, bottom: null });
   const [hoveredChatRowId, setHoveredChatRowId] = useState(null);
 
   const [activeConversation, setActiveConversation] = useState(null);
@@ -666,9 +667,20 @@ export default function App() {
         from { opacity: 0; transform: translateY(-4px) scale(0.96); }
         to { opacity: 1; transform: translateY(0) scale(1); }
       }
-      [data-floating-ui="message-options-menu"],
-      [data-floating-ui="chat-dots-menu"] {
+      [data-floating-ui="message-options-menu"] {
         animation: floatingMenuPop 0.14s ease-out;
+      }
+
+      /* Chat-list "⋮" menu: rock-solid (no animation, no filter/transform
+         effects on the option buttons) so hovering never makes it blink
+         and clicks always register. */
+      [data-floating-ui="chat-dots-menu"] button {
+        transition: background-color 0.12s ease !important;
+        filter: none !important;
+        transform: none !important;
+      }
+      [data-floating-ui="chat-dots-menu"] button:hover:not(:disabled) {
+        background-color: #f0f2f5 !important;
       }
 
       /* Glowing green online indicator — used instead of literal
@@ -830,7 +842,17 @@ export default function App() {
   // near-instant at the cost of a bit more network chatter, which is the
   // right trade-off for a chat app.
   const PRESENCE_HEARTBEAT_INTERVAL_MS = 3000;
-  const PRESENCE_STALE_THRESHOLD_MS = 10000;
+  // A user stays "online" for as long as their site tab is open — even when
+  // they are viewing other tabs/apps (browsers heavily throttle timers in
+  // background tabs, so this threshold must be generous). Closing the tab
+  // fires an immediate 'leave' event, which flips them offline instantly.
+  const PRESENCE_STALE_THRESHOLD_MS = 150000;
+  // How often the UI re-checks for zombie presence entries.
+  const PRESENCE_STALE_CHECK_INTERVAL_MS = 10000;
+  // The profiles.last_seen DB write is throttled: every write is broadcast
+  // by realtime to every client (triggering full refetches + re-renders),
+  // which made the whole UI flicker (incl. the chat "⋮" menu).
+  const PRESENCE_DB_WRITE_INTERVAL_MS = 30000;
 
   useEffect(() => {
     if (!profile?.id) return;
@@ -839,14 +861,20 @@ export default function App() {
       config: { presence: { key: profile.id } }
     });
 
+    let lastDbWriteAt = 0;
+
     const updatePresence = async (isOnline) => {
-      const now = new Date().toISOString();
-      try {
-        await supabase
-          .from('profiles')
-          .update({ last_seen: now })
-          .eq('id', profile.id);
-      } catch (err) {}
+      const nowMs = Date.now();
+      const now = new Date(nowMs).toISOString();
+      if (nowMs - lastDbWriteAt >= PRESENCE_DB_WRITE_INTERVAL_MS) {
+        lastDbWriteAt = nowMs;
+        try {
+          await supabase
+            .from('profiles')
+            .update({ last_seen: now })
+            .eq('id', profile.id);
+        } catch (err) {}
+      }
 
       presenceChannel.track({
         online_at: now,
@@ -915,8 +943,10 @@ export default function App() {
         }
       });
 
+    // Switching to another tab must NOT make the user look offline — they
+    // stay online (green) until the website tab itself is closed.
     const handleVisibility = () => {
-      updatePresence(document.visibilityState === 'visible');
+      updatePresence(true);
     };
     document.addEventListener('visibilitychange', handleVisibility);
 
@@ -926,11 +956,34 @@ export default function App() {
     const handleWindowFocus = () => updatePresence(true);
     window.addEventListener('focus', handleWindowFocus);
 
-    const heartbeatInterval = setInterval(() => {
-      if (presenceChannel && document.visibilityState === 'visible') {
-        updatePresence(true);
-      }
-    }, PRESENCE_HEARTBEAT_INTERVAL_MS);
+    // Heartbeat keeps running even while the tab is hidden. A Web Worker
+    // timer is used when available because browsers throttle normal timers
+    // in background tabs (down to ~1/min), which would otherwise let the
+    // presence go stale. Falls back to a plain setInterval if unavailable.
+    let heartbeatInterval = null;
+    let heartbeatWorker = null;
+    let heartbeatWorkerUrl = null;
+    const sendHeartbeat = () => {
+      if (presenceChannel) updatePresence(true);
+    };
+    const startFallbackHeartbeat = () => {
+      if (heartbeatInterval) return;
+      heartbeatInterval = setInterval(sendHeartbeat, PRESENCE_HEARTBEAT_INTERVAL_MS);
+    };
+    try {
+      const workerSource = 'setInterval(function(){ postMessage(1); }, ' + PRESENCE_HEARTBEAT_INTERVAL_MS + ');';
+      heartbeatWorkerUrl = URL.createObjectURL(new Blob([workerSource], { type: 'application/javascript' }));
+      heartbeatWorker = new Worker(heartbeatWorkerUrl);
+      heartbeatWorker.onmessage = sendHeartbeat;
+      heartbeatWorker.onerror = () => {
+        try { heartbeatWorker.terminate(); } catch (e) {}
+        heartbeatWorker = null;
+        startFallbackHeartbeat();
+      };
+    } catch (err) {
+      heartbeatWorker = null;
+      startFallbackHeartbeat();
+    }
 
     // Forces a periodic re-render so any "zombie" presence entry (one that
     // stopped heartbeating without a clean 'leave' event, e.g. a dropped
@@ -939,22 +992,29 @@ export default function App() {
     // happens to re-render the component.
     const staleCheckInterval = setInterval(() => {
       setOnlinePresenceState(prev => ({ ...prev }));
-    }, PRESENCE_STALE_THRESHOLD_MS);
+    }, PRESENCE_STALE_CHECK_INTERVAL_MS);
 
     const handleUnload = () => {
       try {
         const now = new Date().toISOString();
         supabase.from('profiles').update({ last_seen: now }).eq('id', profile.id);
       } catch (e) {}
+      // Closing the website tab is the ONLY thing that should flip a user to
+      // offline — untrack right away so others see it instantly.
+      try { presenceChannel.untrack(); } catch (e) {}
     };
     window.addEventListener('beforeunload', handleUnload);
+    window.addEventListener('pagehide', handleUnload);
 
     return () => {
-      clearInterval(heartbeatInterval);
+      if (heartbeatInterval) clearInterval(heartbeatInterval);
+      if (heartbeatWorker) { try { heartbeatWorker.terminate(); } catch (e) {} }
+      if (heartbeatWorkerUrl) { try { URL.revokeObjectURL(heartbeatWorkerUrl); } catch (e) {} }
       clearInterval(staleCheckInterval);
       document.removeEventListener('visibilitychange', handleVisibility);
       window.removeEventListener('focus', handleWindowFocus);
       window.removeEventListener('beforeunload', handleUnload);
+      window.removeEventListener('pagehide', handleUnload);
       updatePresence(false);
       presenceChannel.unsubscribe();
     };
@@ -1991,6 +2051,20 @@ export default function App() {
       document.removeEventListener('touchstart', handleGlobalPointerDownCloseMenus, true);
     };
   }, []);
+
+  // The chat "⋮" menu is positioned relative to the viewport (so it is never
+  // clipped by the scrolling chat list or shifted by scrollbar changes);
+  // therefore close it if the list scrolls or the window resizes.
+  useEffect(() => {
+    if (!chatDropdownOpenId) return;
+    const closeChatDropdown = () => setChatDropdownOpenId(null);
+    window.addEventListener('resize', closeChatDropdown);
+    window.addEventListener('scroll', closeChatDropdown, true);
+    return () => {
+      window.removeEventListener('resize', closeChatDropdown);
+      window.removeEventListener('scroll', closeChatDropdown, true);
+    };
+  }, [chatDropdownOpenId]);
 
   const scrollToBottom = (behavior = 'smooth') => {
     if (chatContainerRef.current) {
@@ -3257,6 +3331,13 @@ export default function App() {
                             data-floating-ui="chat-dots-trigger"
                             onClick={(e) => {
                               e.stopPropagation();
+                              const triggerRect = e.currentTarget.getBoundingClientRect();
+                              const openUpwards = triggerRect.bottom + 100 > window.innerHeight;
+                              setChatDropdownPos({
+                                top: openUpwards ? null : triggerRect.bottom + 4,
+                                bottom: openUpwards ? window.innerHeight - triggerRect.top + 4 : null,
+                                right: Math.max(8, window.innerWidth - triggerRect.right),
+                              });
                               setChatDropdownOpenId(chatDropdownOpenId === c.id ? null : c.id);
                             }}
                             style={styles.chatDotsBtn}
@@ -3266,7 +3347,20 @@ export default function App() {
                           </button>
 
                           {chatDropdownOpenId === c.id && (
-                            <div data-floating-ui="chat-dots-menu" style={styles.chatDropdownMenu}>
+                            <div
+                              data-floating-ui="chat-dots-menu"
+                              onMouseDown={(e) => e.stopPropagation()}
+                              onClick={(e) => e.stopPropagation()}
+                              style={{
+                                ...styles.chatDropdownMenu,
+                                position: 'fixed',
+                                top: chatDropdownPos.top != null ? chatDropdownPos.top : 'auto',
+                                bottom: chatDropdownPos.bottom != null ? chatDropdownPos.bottom : 'auto',
+                                right: chatDropdownPos.right,
+                                left: 'auto',
+                                zIndex: 500,
+                              }}
+                            >
                               <button
                                 onClick={(e) => toggleArchiveChat(c.id, e)}
                                 style={styles.dropdownOptionBtn}
