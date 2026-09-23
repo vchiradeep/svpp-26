@@ -279,6 +279,7 @@ export default function App() {
   const [enteredArchivePin, setEnteredArchivePin] = useState('');
   const [isArchiveUnlocked, setIsArchiveUnlocked] = useState(false);
   const [chatDropdownOpenId, setChatDropdownOpenId] = useState(null);
+  const [hoveredChatRowId, setHoveredChatRowId] = useState(null);
 
   const [activeConversation, setActiveConversation] = useState(null);
   const [activeConvMembers, setActiveConvMembers] = useState([]);
@@ -2862,9 +2863,9 @@ export default function App() {
             {isDeletedUser ? '🗑️' : displayName[0].toUpperCase()}
           </div>
         )}
-        {!isDeletedUser && !isGroupMember && (
+        {!isDeletedUser && !isGroupMember && statusType === 'online' && (
           <div
-            className={statusType === 'online' ? 'online-glow-dot' : undefined}
+            className="online-glow-dot"
             style={{
               position: 'absolute',
               bottom: '0',
@@ -2872,10 +2873,10 @@ export default function App() {
               width: `${Math.max(10, Math.round(size * 0.26))}px`,
               height: `${Math.max(10, Math.round(size * 0.26))}px`,
               borderRadius: '50%',
-              backgroundColor: statusColor,
+              backgroundColor: '#25d366',
               border: '2px solid #ffffff',
             }}
-            title={statusType === 'online' ? 'Online' : 'Offline'}
+            title="Online"
           />
         )}
       </div>
@@ -3203,11 +3204,13 @@ export default function App() {
                     return (
                       <div
                         key={c.id}
-                        className="hover-dim"
                         onClick={() => handleSelectConversation(c)}
+                        onMouseEnter={() => setHoveredChatRowId(c.id)}
+                        onMouseLeave={() => setHoveredChatRowId((prev) => (prev === c.id ? null : prev))}
                         style={{
                           ...styles.chatRow,
-                          backgroundColor: isSelected ? '#f0f2f5' : '#ffffff',
+                          backgroundColor: isSelected ? '#f0f2f5' : (hoveredChatRowId === c.id ? '#f7f8f9' : '#ffffff'),
+                          transition: 'background-color 0.15s ease',
                           borderBottom: '1px solid #f0f2f5',
                           position: 'relative'
                         }}
