@@ -946,7 +946,14 @@ export default function App() {
             .then(() => {}, () => {});
         }
       })
-      .subscribe(async (status) => {
+      .subscribe(async (status, err) => {
+        // Diagnostic: if presence never shows up at all (not even briefly),
+        // the realtime channel itself is failing to connect/subscribe before
+        // any of the logic above ever runs. This makes that visible instead
+        // of failing silently.
+        if (status !== 'SUBSCRIBED') {
+          console.warn('[presence] global-presence channel status:', status, err || '');
+        }
         if (status === 'SUBSCRIBED') {
           updatePresence(true);
         }
