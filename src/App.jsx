@@ -320,6 +320,14 @@ export default function App() {
   const snapchatBannerTimeoutRef = useRef(null);
   const titleBlinkIntervalRef = useRef(null);
   const activeConversationRef = useRef(null);
+  // loadActiveMembers() is triggered from several places at once (markAsRead,
+  // multiple realtime listeners). Without ordering, an earlier-fired but
+  // slower network response can resolve AFTER a later-fired but faster one,
+  // silently overwriting fresh "seen" data with stale data — which is why a
+  // message's seen tick only ever seemed to "catch up" a cycle late. This
+  // counter lets each response check it is still the most recent request
+  // before applying itself.
+  const activeMembersRequestIdRef = useRef(0);
 
   const [showAiModal, setShowAiModal] = useState(false);
    
@@ -841,24 +849,33 @@ export default function App() {
   // Tunable presence constants — lower values make online/offline status feel
   // near-instant at the cost of a bit more network chatter, which is the
   // right trade-off for a chat app.
-  const PRESENCE_HEARTBEAT_INTERVAL_MS = 3000;
+  const PRESENCE_HEARTBEAT_INTERVAL_MS = 1500;
   // A user stays "online" for as long as their site tab is open — even when
   // they are viewing other tabs/apps (browsers heavily throttle timers in
   // background tabs, so this threshold must be generous). Closing the tab
   // fires an immediate 'leave' event, which flips them offline instantly.
   const PRESENCE_STALE_THRESHOLD_MS = 150000;
   // How often the UI re-checks for zombie presence entries.
-  const PRESENCE_STALE_CHECK_INTERVAL_MS = 10000;
+  const PRESENCE_STALE_CHECK_INTERVAL_MS = 4000;
   // The profiles.last_seen DB write is throttled: every write is broadcast
   // by realtime to every client (triggering full refetches + re-renders),
   // which made the whole UI flicker (incl. the chat "⋮" menu).
   const PRESENCE_DB_WRITE_INTERVAL_MS = 30000;
 
   useEffect(() => {
-    if (!profile?.id) return;
+    // Gate on the auth session's user id, NOT profile.id. profile.id only
+    // becomes available after a full `profiles` table SELECT finishes
+    // (loadProfile), which is an entirely avoidable network round-trip
+    // sitting in front of the presence websocket connection — every ms
+    // spent waiting on that fetch is a ms of extra delay before "online"
+    // can possibly show up for anyone. session.user.id is the exact same
+    // value (loadProfile is always called with session.user.id) and is
+    // ready the instant auth resolves, so use it directly here.
+    const presenceUserId = session?.user?.id;
+    if (!presenceUserId) return;
 
     const presenceChannel = supabase.channel('global-presence', {
-      config: { presence: { key: profile.id } }
+      config: { presence: { key: presenceUserId } }
     });
 
     let lastDbWriteAt = 0;
@@ -886,7 +903,7 @@ export default function App() {
         supabase
           .from('profiles')
           .update({ last_seen: now })
-          .eq('id', profile.id)
+          .eq('id', presenceUserId)
           .then(() => {}, () => {});
       }
     };
@@ -1013,7 +1030,7 @@ export default function App() {
     const handleUnload = () => {
       try {
         const now = new Date().toISOString();
-        supabase.from('profiles').update({ last_seen: now }).eq('id', profile.id);
+        supabase.from('profiles').update({ last_seen: now }).eq('id', presenceUserId);
       } catch (e) {}
       // Closing the website tab is the ONLY thing that should flip a user to
       // offline — untrack right away so others see it instantly.
@@ -1034,7 +1051,7 @@ export default function App() {
       updatePresence(false);
       presenceChannel.unsubscribe();
     };
-  }, [profile?.id]);
+  }, [session?.user?.id]);
 
   const handleSignOut = async () => {
     if (profile?.id) {
@@ -1787,10 +1804,15 @@ export default function App() {
   };
 
   const loadActiveMembers = async (convId) => {
+    const requestId = ++activeMembersRequestIdRef.current;
     const { data } = await supabase
       .from('conversation_members')
       .select('conversation_id, user_id, hidden_at, last_read_at, profiles(id, username, avatar_url)')
       .eq('conversation_id', convId);
+    // Discard this response if a newer loadActiveMembers call has since been
+    // issued — otherwise a slow, now-stale response can overwrite the fresh
+    // "seen" state that a later, faster response already applied.
+    if (requestId !== activeMembersRequestIdRef.current) return;
     if (data) setActiveConvMembers([...data]);
   };
 
