@@ -387,6 +387,8 @@ export default function App() {
   const snapchatBannerTimeoutRef = useRef(null);
   const titleBlinkIntervalRef = useRef(null);
   const activeConversationRef = useRef(null);
+  const deletedChatIdsRef = useRef(new Set());
+  const isStartingChatRef = useRef(false);
   // Tracks last_message_at per conversation (ms) so the conversations
   // subscription can tell "a new message just arrived" apart from any other
   // field on the conversation doc changing (e.g. someone else's read
@@ -1327,60 +1329,68 @@ export default function App() {
   };
 
   const handleStartDirectChat = async (friend, isInitialAccept = false) => {
-    let existing = conversations.find(
-      (c) => !c.is_group && c.conversation_members?.some((m) => m.user_id === friend.id)
-    );
+    if (isStartingChatRef.current || !friend?.id) return;
+    isStartingChatRef.current = true;
 
-    if (existing) {
-      await unhideConversationForUser(existing.id, profile.id);
+    try {
+      // Double-check against current conversations state
+      let existing = conversations.find(
+        (c) => !c.is_group && c.conversation_members?.some((m) => m.user_id === friend.id)
+      );
 
-      const unhiddenConv = {
-        ...existing,
-        conversation_members: existing.conversation_members.map((m) =>
-          m.user_id === profile.id ? { ...m, hidden_at: null, last_read_at: new Date().toISOString() } : m
-        ),
+      if (existing) {
+        await unhideConversationForUser(existing.id, profile.id);
+
+        const unhiddenConv = {
+          ...existing,
+          conversation_members: existing.conversation_members.map((m) =>
+            m.user_id === profile.id ? { ...m, hidden_at: null, last_read_at: new Date().toISOString() } : m
+          ),
+        };
+
+        handleSelectConversation(unhiddenConv);
+        setConversations((prev) => [unhiddenConv, ...prev.filter((c) => c.id !== unhiddenConv.id)]);
+        setShowNewChatModal(false);
+        setProfilePreviewTarget(null);
+        setActiveTab('chats');
+        return;
+      }
+
+      let newConversationId;
+      try {
+        newConversationId = await createDirectConversation(profile, friend);
+      } catch (error) {
+        alert('Could not start conversation: ' + error.message);
+        return;
+      }
+
+      await sendMessageToFirestore(
+        newConversationId,
+        isInitialAccept ? friend.id : profile.id,
+        'hi',
+        [profile.id, friend.id]
+      );
+
+      const now = new Date().toISOString();
+      const builtConv = {
+        id: newConversationId,
+        is_group: false,
+        created_at: now,
+        conversation_members: [
+          { conversation_id: newConversationId, user_id: profile.id, profiles: profile, hidden_at: null, last_read_at: now },
+          { conversation_id: newConversationId, user_id: friend.id, profiles: friend, hidden_at: null, last_read_at: null }
+        ]
       };
 
-      handleSelectConversation(unhiddenConv);
-      setConversations((prev) => [unhiddenConv, ...prev.filter((c) => c.id !== unhiddenConv.id)]);
+      handleSelectConversation(builtConv);
+      setConversations((prev) => [builtConv, ...prev.filter((c) => c.id !== builtConv.id)]);
       setShowNewChatModal(false);
       setProfilePreviewTarget(null);
       setActiveTab('chats');
-      return;
+      fetchConversations(profile.id);
+    } finally {
+      isStartingChatRef.current = false;
     }
-
-    let newConversationId;
-    try {
-      newConversationId = await createDirectConversation(profile, friend);
-    } catch (error) {
-      alert('Could not start conversation: ' + error.message);
-      return;
-    }
-
-    await sendMessageToFirestore(
-      newConversationId,
-      isInitialAccept ? friend.id : profile.id,
-      'hi',
-      [profile.id, friend.id]
-    );
-
-    const now = new Date().toISOString();
-    const builtConv = {
-      id: newConversationId,
-      is_group: false,
-      created_at: now,
-      conversation_members: [
-        { conversation_id: newConversationId, user_id: profile.id, profiles: profile, hidden_at: null, last_read_at: now },
-        { conversation_id: newConversationId, user_id: friend.id, profiles: friend, hidden_at: null, last_read_at: null }
-      ]
-    };
-
-    handleSelectConversation(builtConv);
-    setConversations((prev) => [builtConv, ...prev.filter((c) => c.id !== builtConv.id)]);
-    setShowNewChatModal(false);
-    setProfilePreviewTarget(null);
-    setActiveTab('chats');
-    fetchConversations(profile.id);
   };
 
   const createGroupChat = async () => {
@@ -2230,31 +2240,34 @@ export default function App() {
   const handleDeleteChatFromList = async (convId, e) => {
     if (e) e.stopPropagation();
     setChatDropdownOpenId(null);
-    if (!window.confirm('Delete this chat from your list? It will reappear (with its messages) if a new message arrives.')) return;
+    
+    if (!window.confirm('Delete this chat from your list?')) return;
 
-    if (activeConversationRef.current?.id === convId) setActiveConversation(null);
-
-    setConversations((prev) =>
-      prev.map((c) => {
-        if (c.id === convId) {
-          return {
-            ...c,
-            conversation_members: (c.conversation_members || []).map((m) =>
-              m.user_id === profile.id ? { ...m, hidden_at: new Date().toISOString() } : m
-            ),
-          };
-        }
-        return c;
-      })
-    );
-
-    try {
-      await hideConversationForUser(convId, profile.id);
-    } catch (error) {
-      alert('Failed to delete chat: ' + error.message);
+    if (activeConversationRef.current?.id === convId) {
+      setActiveConversation(null);
     }
 
-    fetchConversations(profile.id);
+    // 1. Permanently block this chat ID from showing up on screen
+    deletedChatIdsRef.current.add(convId);
+
+    // 2. Instantly remove it from your current chat list state
+    setConversations((prev) => prev.filter((c) => c.id !== convId));
+
+    try {
+      const targetConv = conversations.find((c) => c.id === convId);
+      if (!targetConv) return;
+
+      const now = new Date().toISOString();
+      const updatedMembers = (targetConv.conversation_members || []).map((m) =>
+        m.user_id === profile.id ? { ...m, hidden_at: now } : m
+      );
+
+      // 3. Save the hidden status to Firebase
+      await updateConversation(convId, { conversation_members: updatedMembers });
+    } catch (error) {
+      console.error('Failed to delete chat:', error);
+      alert('Failed to delete chat: ' + error.message);
+    }
   };
 
   const handleBatchDeleteForMe = async () => {
@@ -2807,6 +2820,7 @@ export default function App() {
     : 0;
 
   const visibleConversations = conversations.filter((c) => {
+    if (deletedChatIdsRef.current.has(c.id)) return false;
     const myMem = c.conversation_members?.find((m) => m.user_id === profile?.id);
     return !myMem?.hidden_at && !archivedConvIds.includes(c.id);
   });
