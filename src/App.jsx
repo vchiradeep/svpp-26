@@ -83,7 +83,12 @@ const EMOJI_PALETTE = [
 ];
 
 const FAVICON_SVG = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="28" cy="36" r="15" fill="%230f172a"/><path d="M12 88 C12 62 44 62 44 88 Z" fill="%230f172a"/><circle cx="72" cy="36" r="15" fill="%230f172a"/><path d="M56 88 C56 62 88 62 88 88 Z" fill="%230f172a"/><path d="M38 28 C38 18 64 18 64 28 C64 35 55 37 49 41 L43 45 L45 39 C39 39 38 34 38 28 Z" fill="%230f172a"/><rect x="43" y="24" width="16" height="2.5" rx="1.2" fill="%23ffffff"/><rect x="43" y="29" width="16" height="2.5" rx="1.2" fill="%23ffffff"/></svg>`;
-
+const parseSafeDate = (val) => {
+  if (!val) return new Date();
+  if (typeof val.toDate === 'function') return val.toDate();
+  if (val.seconds) return new Date(val.seconds * 1000);
+  return new Date(val);
+};
 // A fresh AudioContext starts life 'suspended' until a user gesture unlocks
 // it, and creating a brand new one on every single notification made that
 // unlock unreliable. Keeping one shared context (created once, primed on the
@@ -261,7 +266,7 @@ const formatLastSeen = (isoString) => {
 
 const formatChatTimestamp = (isoString) => {
   if (!isoString) return '';
-  const date = new Date(isoString);
+  const date = parseSafeDate(isoString); // <-- Change new Date(isoString) to parseSafeDate(isoString)
   const now = new Date();
   const isToday = date.toDateString() === now.toDateString();
   const yesterday = new Date();
@@ -279,7 +284,7 @@ const formatChatTimestamp = (isoString) => {
 
 const getMessageDateLabel = (isoString) => {
   if (!isoString) return '';
-  const date = new Date(isoString);
+  const date = parseSafeDate(isoString); // <-- Change new Date(isoString) to parseSafeDate(isoString)
   const now = new Date();
   const isToday = date.toDateString() === now.toDateString();
   const yesterday = new Date();
@@ -3457,7 +3462,7 @@ export default function App() {
                   }
 
                   const isMe = m.sender_id === profile?.id;
-                  const time = new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                  const time = parseSafeDate(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                   const msgKind = getMessageKind(m.content);
                   const isImage = msgKind === 'image';
                   const isViewOnceImg = msgKind === 'view-once';
