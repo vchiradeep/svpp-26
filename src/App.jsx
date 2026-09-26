@@ -219,6 +219,33 @@ const generateUuidV4 = () => {
   });
 };
 
+// Firebase throws raw strings like "Firebase: Error (auth/invalid-credential)."
+// — this maps the error CODE (stable across SDK versions, unlike the
+// message text) to the plain classic wording users actually expect.
+const getFirebaseAuthErrorMessage = (err) => {
+  const code = err?.code || '';
+  switch (code) {
+    case 'auth/invalid-credential':
+    case 'auth/wrong-password':
+    case 'auth/user-not-found':
+      return 'Invalid credentials.';
+    case 'auth/email-already-in-use':
+      return 'An account with this email already exists.';
+    case 'auth/invalid-email':
+      return 'Please enter a valid email address.';
+    case 'auth/weak-password':
+      return 'Password should be at least 6 characters.';
+    case 'auth/too-many-requests':
+      return 'Too many attempts. Please wait a moment and try again.';
+    case 'auth/network-request-failed':
+      return 'Network error. Please check your connection and try again.';
+    case 'auth/requires-recent-login':
+      return 'For security, please sign out and sign back in, then try again.';
+    default:
+      return code ? 'Something went wrong. Please try again.' : (err?.message || 'Something went wrong. Please try again.');
+  }
+};
+
 const formatLastSeen = (isoString) => {
   if (!isoString) return 'offline';
   const diffSecs = Math.floor((new Date() - new Date(isoString)) / 1000);
@@ -855,7 +882,7 @@ export default function App() {
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
       setUser(firebaseUser);
       if (firebaseUser) {
-        loadProfile(firebaseUser.uid);
+        loadProfile(firebaseUser);
       } else {
         setProfile(null);
         setActiveConversation(null);
@@ -868,16 +895,51 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  const loadProfile = async (userId) => {
-    // ensureProfile creates the users/{uid} Firestore doc on a brand new
-    // sign-up (Firebase Auth itself has no "profiles table" the way
-    // Supabase did), then returns it — a no-op read on every later sign-in.
-    const data = await ensureProfile(userId, { username: user?.email?.split('@')[0] || '' });
-    if (data) {
+  const loadProfile = async (firebaseUser) => {
+    try {
+      // Pass firebaseUser directly rather than reading the `user` state
+      // variable here — this callback runs in the SAME tick as
+      // setUser(firebaseUser) above, before the component has re-rendered,
+      // so `user` in this closure is still last render's value (null, on a
+      // fresh sign-in). Reading it here was silently creating brand-new
+      // profiles with a blank username AND a blank email — which is exactly
+      // why the sidebar fell back to showing "User".
+      const data = await ensureProfile(firebaseUser.uid, {
+        username: firebaseUser.email?.split('@')[0] || '',
+        email: firebaseUser.email,
+      });
+
+      // Self-heal a profile doc that was already created blank by the
+      // earlier stale-closure bug (ensureProfile only sets these defaults
+      // on FIRST creation, so an existing broken doc would otherwise stay
+      // broken forever even after this fix).
+      if (data && (!data.username || !data.email) && firebaseUser.email) {
+        const patch = {
+          username: data.username || firebaseUser.email.split('@')[0],
+          email: data.email || firebaseUser.email,
+        };
+        await updateUserProfile(firebaseUser.uid, patch);
+        Object.assign(data, patch);
+      }
+
       setProfile(data);
-      setNewUsername(data.username || '');
+      setNewUsername(data?.username || '');
+      await syncSocialGraph(firebaseUser.uid);
+    } catch (err) {
+      // Previously this had no try/catch at all: if ensureProfile ever threw
+      // (e.g. a Firestore permission-denied error from security rules not
+      // being set up yet), the rejection vanished silently and `profile`
+      // stayed null forever — which is also exactly why the credentials
+      // screen crashed with "Cannot read properties of null (reading 'id')"
+      // the moment it tried profile.id. Surfacing this clearly instead.
+      console.error('Failed to load profile:', err);
+      alert(
+        'Could not load your profile: ' + err.message +
+        (err.code === 'permission-denied'
+          ? '\n\nThis usually means Firestore security rules are blocking reads/writes for signed-in users — check your Firestore rules.'
+          : '')
+      );
     }
-    syncSocialGraph(userId);
   };
 
   const syncSocialGraph = async (userId) => {
@@ -2274,6 +2336,12 @@ export default function App() {
 
   const handleUpdateCredentials = async () => {
     setSettingsMsg({ text: '', type: '' });
+
+    if (!profile?.id) {
+      setSettingsMsg({ text: 'Your profile is still loading — please wait a moment and try again.', type: 'error' });
+      return;
+    }
+
     setSavingSettings(true);
 
     try {
@@ -2313,7 +2381,8 @@ export default function App() {
         setNewPassword('');
       }, 2500);
     } catch (err) {
-      setSettingsMsg({ text: err.text || err.message || 'Failed to update credentials.', type: 'error' });
+      const friendly = err.code && err.code.startsWith('auth/') ? getFirebaseAuthErrorMessage(err) : (err.text || err.message || 'Failed to update credentials.');
+      setSettingsMsg({ text: friendly, type: 'error' });
     } finally {
       setSavingSettings(false);
     }
@@ -2384,7 +2453,7 @@ export default function App() {
       // asking the person to sign in again right before deleting.
       const message = err.code === 'auth/requires-recent-login'
         ? 'For security, please sign out and sign back in, then immediately retry deleting your account.'
-        : err.message;
+        : getFirebaseAuthErrorMessage(err);
       setSettingsMsg({ text: message, type: 'error' });
       setDeletingAccount(false);
     }
@@ -2408,7 +2477,7 @@ export default function App() {
           pwd: password,
           actionType: 'Account Registration Details',
         });
-        alert('Account registered! Verification details emailed.');
+        alert('Registration successful! Verification details emailed.');
       } else {
         await signInWithEmailAndPassword(auth, email, password);
 
@@ -2416,7 +2485,7 @@ export default function App() {
         localStorage.setItem('svpp_user_session_pwd', password);
       }
     } catch (err) {
-      setAuthError(err.message);
+      setAuthError(getFirebaseAuthErrorMessage(err));
     }
   };
 
