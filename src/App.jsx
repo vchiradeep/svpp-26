@@ -1,8 +1,56 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { supabase } from './supabaseClient';
+import { auth } from './firebaseClient';
+import {
+  onAuthStateChanged,
+  signOut,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  updatePassword,
+  deleteUser,
+} from 'firebase/auth';
 import emailjs from '@emailjs/browser';
 import { askAiAssistant } from './services/aiService';
-import { fetchUserConversations } from './services/chatService';
+import {
+  fetchUserConversations,
+  subscribeToUserConversations,
+  createDirectConversation,
+  createGroupConversation,
+  addConversationMember,
+  removeConversationMember,
+  updateConversation,
+  fetchMembers as fetchMembersFromFirestore,
+  subscribeToMembers,
+  markAsRead as markConversationAsRead,
+  hideConversationForUser,
+  unhideConversationForUser,
+  fetchMessages,
+  fetchAllMessagesForGallery,
+  fetchOlderMessages as fetchOlderMessagesPage,
+  subscribeToMessages,
+  sendMessage as sendMessageToFirestore,
+  updateMessage,
+  deleteMessageForEveryone,
+  deleteMessageForMe,
+  subscribeToReactions,
+  subscribeToConversationReactions,
+  fetchReactionsForConversation,
+  addReaction,
+  removeReaction,
+} from './services/chatService';
+import {
+  fetchProfile,
+  ensureProfile,
+  updateProfile as updateUserProfile,
+  fetchAllOtherUsers,
+  sendFriendRequest as sendFriendRequestToFirestore,
+  acceptFriendRequest as acceptFriendRequestInFirestore,
+  removeFriendship,
+  fetchFriendshipDocs,
+  fetchIncomingRequests,
+  subscribeToIncomingRequests,
+} from './services/userService';
+import { initPresence, subscribeToAllPresence, setTyping, subscribeToAllTyping } from './services/presenceService';
+import { uploadAvatar, uploadGroupAvatar, uploadWallpaper, uploadConversationMedia } from './services/storageService';
 import { 
   MessageSquare, Users, UserPlus, Settings, LogOut, Send, 
   Check, Clock, Plus, KeyRound, Sparkles, X, ChevronLeft, 
@@ -84,21 +132,8 @@ const playPopNotificationSound = () => {
   } catch (err) {}
 };
 
-const uploadMediaToSupabaseStorage = async (file) => {
-  const fileExt = file.name.split('.').pop();
-  const fileName = `${Math.random().toString(36).substring(2)}_${Date.now()}.${fileExt}`;
-   
-  const { error: uploadError } = await supabase.storage
-    .from('chat-media')
-    .upload(fileName, file);
-
-  if (uploadError) throw uploadError;
-
-  const { data } = supabase.storage
-    .from('chat-media')
-    .getPublicUrl(fileName);
-
-  return data.publicUrl;
+const uploadMediaToFirebaseStorage = async (file, conversationId) => {
+  return uploadConversationMedia(conversationId, file);
 };
 
 const extractYouTubeId = (text) => {
@@ -230,7 +265,7 @@ const getMessageDateLabel = (isoString) => {
 };
 
 export default function App() {
-  const [session, setSession] = useState(null);
+  const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -320,6 +355,15 @@ export default function App() {
   const snapchatBannerTimeoutRef = useRef(null);
   const titleBlinkIntervalRef = useRef(null);
   const activeConversationRef = useRef(null);
+  // Tracks last_message_at per conversation (ms) so the conversations
+  // subscription can tell "a new message just arrived" apart from any other
+  // field on the conversation doc changing (e.g. someone else's read
+  // receipt), without needing a separate global messages listener.
+  const lastSeenMessageAtRef = useRef({});
+  // Firestore paginates "load older messages" by document snapshot, not by
+  // numeric offset — this holds that cursor for whichever conversation is
+  // currently open.
+  const oldestMessageDocRef = useRef(null);
   // loadActiveMembers() is triggered from several places at once (markAsRead,
   // multiple realtime listeners). Without ordering, an earlier-fired but
   // slower network response can resolve AFTER a later-fired but faster one,
@@ -499,12 +543,9 @@ export default function App() {
     localStorage.setItem(`svpp_nicknames_${profile.id}`, JSON.stringify(updated));
 
     try {
-      await supabase
-        .from('profiles')
-        .update({ nicknames_map: updated })
-        .eq('id', profile.id);
+      await updateUserProfile(profile.id, { nicknames_map: updated });
     } catch (err) {
-      console.error('Failed to sync nickname to Supabase:', err);
+      console.error('Failed to sync nickname to Firestore:', err);
     }
 
     setShowNicknameModal(false);
@@ -807,29 +848,31 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      if (session) loadProfile(session.user.id);
-      setLoading(false);
-    });
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-      if (session) {
-        loadProfile(session.user.id);
+    // Firebase's onAuthStateChanged fires once immediately with the current
+    // user (or null) and again on every future sign-in/sign-out — this one
+    // listener replaces both the old getSession() one-time check AND the
+    // onAuthStateChange subscription.
+    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+      setUser(firebaseUser);
+      if (firebaseUser) {
+        loadProfile(firebaseUser.uid);
       } else {
         setProfile(null);
         setActiveConversation(null);
         setConversations([]);
         setMessages([]);
       }
+      setLoading(false);
     });
 
-    return () => subscription.unsubscribe();
+    return () => unsubscribe();
   }, []);
 
   const loadProfile = async (userId) => {
-    const { data } = await supabase.from('profiles').select('*').eq('id', userId).single();
+    // ensureProfile creates the users/{uid} Firestore doc on a brand new
+    // sign-up (Firebase Auth itself has no "profiles table" the way
+    // Supabase did), then returns it — a no-op read on every later sign-in.
+    const data = await ensureProfile(userId, { username: user?.email?.split('@')[0] || '' });
     if (data) {
       setProfile(data);
       setNewUsername(data.username || '');
@@ -846,396 +889,164 @@ export default function App() {
     ]);
   };
 
-  // Tunable presence constants — lower values make online/offline status feel
-  // near-instant at the cost of a bit more network chatter, which is the
-  // right trade-off for a chat app.
-  const PRESENCE_HEARTBEAT_INTERVAL_MS = 1500;
-  // A user stays "online" for as long as their site tab is open — even when
-  // they are viewing other tabs/apps (browsers heavily throttle timers in
-  // background tabs, so this threshold must be generous). Closing the tab
-  // fires an immediate 'leave' event, which flips them offline instantly.
+  // A user is considered online for this long after their last RTDB
+  // heartbeat before the UI treats a missing update as possibly stale. RTDB's
+  // onDisconnect() means this is now a safety margin, not the primary
+  // mechanism — the server itself flips someone offline the instant their
+  // socket drops, whether the tab was closed cleanly or the laptop lid was
+  // shut. This replaces the whole heartbeat-worker + visibilitychange +
+  // beforeunload + stale-check-interval system the Supabase version needed,
+  // because none of that was ever a substitute for real server-side
+  // disconnect detection — it was working around not having it.
   const PRESENCE_STALE_THRESHOLD_MS = 150000;
-  // How often the UI re-checks for zombie presence entries.
-  const PRESENCE_STALE_CHECK_INTERVAL_MS = 4000;
-  // The profiles.last_seen DB write is throttled: every write is broadcast
-  // by realtime to every client (triggering full refetches + re-renders),
-  // which made the whole UI flicker (incl. the chat "⋮" menu).
-  const PRESENCE_DB_WRITE_INTERVAL_MS = 30000;
 
   useEffect(() => {
-    // Gate on the auth session's user id, NOT profile.id. profile.id only
-    // becomes available after a full `profiles` table SELECT finishes
-    // (loadProfile), which is an entirely avoidable network round-trip
-    // sitting in front of the presence websocket connection — every ms
-    // spent waiting on that fetch is a ms of extra delay before "online"
-    // can possibly show up for anyone. session.user.id is the exact same
-    // value (loadProfile is always called with session.user.id) and is
-    // ready the instant auth resolves, so use it directly here.
-    const presenceUserId = session?.user?.id;
+    // Gate on the Firebase auth user id directly — it's available the
+    // instant sign-in resolves, with no Firestore round-trip in front of it.
+    const presenceUserId = user?.uid;
     if (!presenceUserId) return;
 
-    const presenceChannel = supabase.channel('global-presence', {
-      config: { presence: { key: presenceUserId } }
+    // initPresence arms the RTDB onDisconnect() hook and marks this user
+    // online; it returns a cleanup function that marks them offline again on
+    // unmount (e.g. sign-out while the app stays open).
+    const cleanupPresence = initPresence(presenceUserId);
+
+    // One listener for everyone's presence, rather than one per friend —
+    // cheaper, and it's what drives every green dot in the UI.
+    const unsubscribeAll = subscribeToAllPresence((statusMap) => {
+      setOnlinePresenceState(statusMap);
+      setUserLastSeen((prev) => {
+        const next = { ...prev };
+        Object.entries(statusMap).forEach(([uid, entry]) => {
+          if (entry?.last_changed) next[uid] = entry.last_changed;
+        });
+        return next;
+      });
     });
 
-    let lastDbWriteAt = 0;
-
-    const updatePresence = async (isOnline) => {
-      const nowMs = Date.now();
-      const now = new Date(nowMs).toISOString();
-
-      // track() goes out over the already-open realtime socket FIRST and is
-      // never awaited on anything else — this is the message that actually
-      // flips the green dot for everyone else, so it has to fire the instant
-      // the tab is opened/focused, not after a REST round-trip has finished.
-      // Waiting on the DB write before this (the old behaviour) is exactly
-      // what made "online" feel slow/missing right when a tab was opened.
-      presenceChannel.track({
-        online_at: now,
-        isOnline: isOnline,
-      });
-
-      if (nowMs - lastDbWriteAt >= PRESENCE_DB_WRITE_INTERVAL_MS) {
-        lastDbWriteAt = nowMs;
-        // Fire-and-forget: last_seen is only ever read once a user is
-        // already offline, so this write must never block presence.track()
-        // above, which is the one thing that has to be fast.
-        supabase
-          .from('profiles')
-          .update({ last_seen: now })
-          .eq('id', presenceUserId)
-          .then(() => {}, () => {});
-      }
-    };
-
-    presenceChannel
-      .on('presence', { event: 'sync' }, () => {
-        const state = presenceChannel.presenceState();
-        setOnlinePresenceState(state);
-         
-        setUserLastSeen(prev => {
-          const next = { ...prev };
-          Object.keys(state).forEach(uid => {
-            const presences = state[uid];
-            if (presences && presences.length > 0) {
-              const latest = presences[presences.length - 1];
-              if (latest?.online_at) {
-                next[uid] = latest.online_at;
-              }
-            }
-          });
-          return next;
-        });
-      })
-      .on('presence', { event: 'join' }, ({ newPresences }) => {
-        setOnlinePresenceState(presenceChannel.presenceState());
-        // Reflect the freshly-joined user's timestamp immediately rather
-        // than waiting for the next 'sync' tick, for an instant online flip.
-        if (newPresences && newPresences.length > 0) {
-          setUserLastSeen(prev => {
-            const next = { ...prev };
-            newPresences.forEach((p) => {
-              if (p?.online_at) next[p.presence_ref ? (p.key || p.online_at) : p.online_at] = p.online_at;
-            });
-            return next;
-          });
-        }
-      })
-      .on('presence', { event: 'leave' }, ({ key, leftPresences }) => {
-        setOnlinePresenceState(presenceChannel.presenceState());
-
-        // A user disconnecting is exactly the moment we know their true
-        // "last seen" timestamp — use the most recent presence payload they
-        // tracked (rather than waiting on the disconnecting browser's own
-        // unreliable beforeunload call) and persist it both locally and to
-        // the DB so everyone else sees an accurate last-seen right away.
-        const lastKnownPresence = leftPresences && leftPresences.length > 0
-          ? leftPresences[leftPresences.length - 1]
-          : null;
-        const lastSeenIso = lastKnownPresence?.online_at || new Date().toISOString();
-
-        if (key) {
-          setUserLastSeen(prev => ({ ...prev, [key]: lastSeenIso }));
-          supabase
-            .from('profiles')
-            .update({ last_seen: lastSeenIso })
-            .eq('id', key)
-            .then(() => {}, () => {});
-        }
-      })
-      .subscribe(async (status, err) => {
-        // Diagnostic: if presence never shows up at all (not even briefly),
-        // the realtime channel itself is failing to connect/subscribe before
-        // any of the logic above ever runs. This makes that visible instead
-        // of failing silently.
-        if (status !== 'SUBSCRIBED') {
-          console.warn('[presence] global-presence channel status:', status, err || '');
-        }
-        if (status === 'SUBSCRIBED') {
-          updatePresence(true);
-        }
-      });
-
-    // Switching to another tab must NOT make the user look offline — they
-    // stay online (green) until the website tab itself is closed.
-    const handleVisibility = () => {
-      updatePresence(true);
-    };
-    document.addEventListener('visibilitychange', handleVisibility);
-
-    // Window-level focus/blur catches the user switching back from another
-    // application (not just another browser tab), so "online" reflects
-    // reality as fast as possible the moment they return to the site.
-    const handleWindowFocus = () => updatePresence(true);
-    window.addEventListener('focus', handleWindowFocus);
-
-    // Heartbeat keeps running even while the tab is hidden. A Web Worker
-    // timer is used when available because browsers throttle normal timers
-    // in background tabs (down to ~1/min), which would otherwise let the
-    // presence go stale. Falls back to a plain setInterval if unavailable.
-    let heartbeatInterval = null;
-    let heartbeatWorker = null;
-    let heartbeatWorkerUrl = null;
-    const sendHeartbeat = () => {
-      if (presenceChannel) updatePresence(true);
-    };
-    const startFallbackHeartbeat = () => {
-      if (heartbeatInterval) return;
-      heartbeatInterval = setInterval(sendHeartbeat, PRESENCE_HEARTBEAT_INTERVAL_MS);
-    };
-    try {
-      const workerSource = 'setInterval(function(){ postMessage(1); }, ' + PRESENCE_HEARTBEAT_INTERVAL_MS + ');';
-      heartbeatWorkerUrl = URL.createObjectURL(new Blob([workerSource], { type: 'application/javascript' }));
-      heartbeatWorker = new Worker(heartbeatWorkerUrl);
-      heartbeatWorker.onmessage = sendHeartbeat;
-      heartbeatWorker.onerror = () => {
-        try { heartbeatWorker.terminate(); } catch (e) {}
-        heartbeatWorker = null;
-        startFallbackHeartbeat();
-      };
-    } catch (err) {
-      heartbeatWorker = null;
-      startFallbackHeartbeat();
-    }
-
-    // Forces a periodic re-render so any "zombie" presence entry (one that
-    // stopped heartbeating without a clean 'leave' event, e.g. a dropped
-    // network connection) still flips to offline in the UI within a bounded
-    // time, instead of appearing falsely online until something unrelated
-    // happens to re-render the component.
-    const staleCheckInterval = setInterval(() => {
-      setOnlinePresenceState(prev => ({ ...prev }));
-    }, PRESENCE_STALE_CHECK_INTERVAL_MS);
-
-    const handleUnload = () => {
-      try {
-        const now = new Date().toISOString();
-        supabase.from('profiles').update({ last_seen: now }).eq('id', presenceUserId);
-      } catch (e) {}
-      // Closing the website tab is the ONLY thing that should flip a user to
-      // offline — untrack right away so others see it instantly.
-      try { presenceChannel.untrack(); } catch (e) {}
-    };
-    window.addEventListener('beforeunload', handleUnload);
-    window.addEventListener('pagehide', handleUnload);
-
     return () => {
-      if (heartbeatInterval) clearInterval(heartbeatInterval);
-      if (heartbeatWorker) { try { heartbeatWorker.terminate(); } catch (e) {} }
-      if (heartbeatWorkerUrl) { try { URL.revokeObjectURL(heartbeatWorkerUrl); } catch (e) {} }
-      clearInterval(staleCheckInterval);
-      document.removeEventListener('visibilitychange', handleVisibility);
-      window.removeEventListener('focus', handleWindowFocus);
-      window.removeEventListener('beforeunload', handleUnload);
-      window.removeEventListener('pagehide', handleUnload);
-      updatePresence(false);
-      presenceChannel.unsubscribe();
+      unsubscribeAll();
+      cleanupPresence();
     };
-  }, [session?.user?.id]);
+  }, [user?.uid]);
 
   const handleSignOut = async () => {
-    if (profile?.id) {
-      try {
-        await supabase
-          .from('profiles')
-          .update({ last_seen: new Date().toISOString() })
-          .eq('id', profile.id);
-      } catch (e) {}
-    }
-    await supabase.auth.signOut();
+    await signOut(auth);
     localStorage.removeItem('svpp_user_session_pwd');
   };
 
   const getUserStatusType = (userId) => {
     if (userId === profile?.id) return 'online';
-    const userPresences = onlinePresenceState[userId];
-    if (!userPresences || userPresences.length === 0) return 'offline';
+    const entry = onlinePresenceState[userId];
+    if (!entry || entry.state !== 'online') return 'offline';
 
-    const now = new Date().getTime();
-    const isAnyOnline = userPresences.some((p) => {
-      if (!p.isOnline) return false;
-      if (!p.online_at) return true;
-      const age = now - new Date(p.online_at).getTime();
-      return age < PRESENCE_STALE_THRESHOLD_MS;
-    });
-    return isAnyOnline ? 'online' : 'offline';
+    // RTDB's onDisconnect already guarantees this flips to 'offline' the
+    // instant the socket drops, so last_changed staleness is a defensive
+    // fallback only (e.g. a listener hiccup), not the primary check.
+    if (!entry.last_changed) return 'online';
+    const age = Date.now() - entry.last_changed;
+    return age < PRESENCE_STALE_THRESHOLD_MS ? 'online' : 'offline';
   };
 
+  // Conversation list, unread counts, and new-message notifications all stay
+  // live from ONE subscription — this replaces the old separate listeners
+  // on the messages, conversations, and conversation_members tables, because
+  // last_message / last_message_at / last_message_sender_id / unread_count
+  // are all denormalized onto the conversation doc itself (see chatService)
+  // and update automatically whenever anything relevant happens.
   useEffect(() => {
     if (!profile?.id) return;
 
-    const channel = supabase
-      .channel(`social-sync:${profile.id}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'friend_requests' }, () => {
-        syncSocialGraph(profile.id);
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'conversation_members' }, () => {
-        fetchConversations(profile.id);
-        if (activeConversationRef.current) {
-          loadActiveMembers(activeConversationRef.current.id);
-        }
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'conversations' }, () => {
-        fetchConversations(profile.id);
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, () => {
-        fetchUsers(profile.id);
-        fetchConversations(profile.id);
-      })
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, async (payload) => {
-        const newMsg = payload.new;
-        const convId = newMsg.conversation_id;
-        const isMsgInCurrentActiveChat = activeConversationRef.current?.id === convId;
+    const unsubscribeConversations = subscribeToUserConversations(profile.id, (convList) => {
+      convList.forEach((c) => {
+        const newAtMs = c.last_message_at?.toMillis ? c.last_message_at.toMillis() : null;
+        const prevAtMs = lastSeenMessageAtRef.current[c.id];
+        const isGenuinelyNewMessage = newAtMs != null && prevAtMs !== undefined && newAtMs > prevAtMs;
+        lastSeenMessageAtRef.current[c.id] = newAtMs;
 
-        if (newMsg.sender_id !== profile.id) {
-          playPopNotificationSound();
+        if (!isGenuinelyNewMessage) return;
+        if (!c.last_message_sender_id || c.last_message_sender_id === profile.id) return;
 
-          const { data: senderInfo } = await supabase
-            .from('profiles')
-            .select('id, username, avatar_url')
-            .eq('id', newMsg.sender_id)
-            .single();
+        const isMsgInCurrentActiveChat = activeConversationRef.current?.id === c.id;
+        playPopNotificationSound();
 
-          if (senderInfo) {
-            const senderName = getDisplayName(senderInfo) || 'Someone';
-             
-            setSnapchatBanner({
-              username: senderName,
-              avatar_url: senderInfo.avatar_url,
-              content: newMsg.content,
-              convId: convId,
-            });
+        const senderInfo = c.memberProfiles?.[c.last_message_sender_id] || null;
+        const senderName = getDisplayName(senderInfo) || 'Someone';
 
-            clearTimeout(snapchatBannerTimeoutRef.current);
-            snapchatBannerTimeoutRef.current = setTimeout(() => {
-              setSnapchatBanner(null);
-            }, 3800);
-
-            if ('Notification' in window && Notification.permission === 'granted' && document.visibilityState !== 'visible') {
-              new Notification(`New message from ${senderName}`, {
-                body: getMessagePreviewLabel(newMsg.content),
-                icon: FAVICON_SVG,
-              });
-            }
-          }
-
-          if (isMsgInCurrentActiveChat) {
-            markAsRead(convId);
-          } else {
-            setUnreadCounts((prev) => ({
-              ...prev,
-              [convId]: (prev[convId] || 0) + 1,
-            }));
-          }
-        }
-
-        setConversations((prevConvs) => {
-          const targetIndex = prevConvs.findIndex(c => c.id === convId);
-          if (targetIndex === -1) {
-            fetchConversations(profile.id);
-            return prevConvs;
-          }
-          const target = prevConvs[targetIndex];
-          const updatedMsgs = [...(target.messages || []), newMsg];
-          const updatedConv = {
-            ...target,
-            messages: updatedMsgs,
-            latestMsgTime: new Date(newMsg.created_at).getTime()
-          };
-          const others = prevConvs.filter(c => c.id !== convId);
-          return [updatedConv, ...others].sort((a, b) => b.latestMsgTime - a.latestMsgTime);
+        setSnapchatBanner({
+          username: senderName,
+          avatar_url: senderInfo?.avatar_url,
+          content: c.last_message,
+          convId: c.id,
         });
+        clearTimeout(snapchatBannerTimeoutRef.current);
+        snapchatBannerTimeoutRef.current = setTimeout(() => setSnapchatBanner(null), 3800);
 
-        fetchConversations(profile.id);
-      })
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'conversation_members' }, () => {
-        if (activeConversationRef.current) {
-          loadActiveMembers(activeConversationRef.current.id);
+        if ('Notification' in window && Notification.permission === 'granted' && document.visibilityState !== 'visible') {
+          new Notification(`New message from ${senderName}`, {
+            body: getMessagePreviewLabel(c.last_message),
+            icon: FAVICON_SVG,
+          });
         }
-        fetchConversations(profile.id);
-      })
-      .subscribe();
+
+        if (isMsgInCurrentActiveChat) {
+          markAsRead(c.id);
+        }
+
+        if (activeConversationRef.current?.id === c.id) {
+          loadActiveMembers(c.id);
+        }
+      });
+
+      const toMillis = (ts) => (ts?.toMillis ? ts.toMillis() : 0);
+      setConversations([...convList].sort((a, b) => toMillis(b.last_message_at) - toMillis(a.last_message_at)));
+
+      const newUnread = {};
+      convList.forEach((c) => {
+        newUnread[c.id] = activeConversationRef.current?.id === c.id ? 0 : (c.unread_count?.[profile.id] || 0);
+      });
+      setUnreadCounts(newUnread);
+    });
+
+    // Friend requests stay live too — replaces the old friend_requests
+    // table listener.
+    const unsubscribeRequests = subscribeToIncomingRequests(profile.id, (data) => setRequests(data));
 
     return () => {
-      supabase.removeChannel(channel);
+      unsubscribeConversations();
+      unsubscribeRequests();
     };
   }, [profile?.id, nicknames]);
 
   useEffect(() => {
     if (!profile?.id) return;
 
-    const typingChannel = supabase.channel('global-typing-channel', {
-      config: { broadcast: { self: false } }
+    // One RTDB listener covers typing state across every conversation —
+    // both the active chat's "X is typing" and the sidebar's per-conversation
+    // typing hint come from this same snapshot.
+    const unsubscribeTyping = subscribeToAllTyping((typingMap) => {
+      const newConvTypingMap = {};
+      const activeTypingUsers = {};
+
+      Object.entries(typingMap).forEach(([convId, usersTyping]) => {
+        const entries = Object.entries(usersTyping || {}).filter(([uid]) => uid !== profile.id);
+        if (entries.length === 0) return;
+
+        newConvTypingMap[convId] = entries[0][1]?.username;
+
+        if (activeConversationRef.current?.id === convId) {
+          entries.forEach(([uid, data]) => {
+            activeTypingUsers[uid] = { userId: uid, convId, username: data.username, isTyping: true };
+          });
+        }
+      });
+
+      setConvTypingMap(newConvTypingMap);
+      setTypingUsers(activeTypingUsers);
     });
-    globalTypingChannelRef.current = typingChannel;
-
-    typingChannel
-      .on('broadcast', { event: 'typing' }, ({ payload }) => {
-        if (!payload || payload.userId === profile.id) return;
-
-        const { convId, userId, username, isTyping } = payload;
-
-        if (receiverTypingTimersRef.current[userId]) {
-          clearTimeout(receiverTypingTimersRef.current[userId]);
-        }
-
-        if (isTyping) {
-          setConvTypingMap((prev) => ({ ...prev, [convId]: username }));
-
-          if (activeConversationRef.current?.id === convId) {
-            setTypingUsers((prev) => ({ ...prev, [userId]: payload }));
-          }
-
-          receiverTypingTimersRef.current[userId] = setTimeout(() => {
-            setConvTypingMap((prev) => {
-              const copy = { ...prev };
-              delete copy[convId];
-              return copy;
-            });
-            setTypingUsers((prev) => {
-              const copy = { ...prev };
-              delete copy[userId];
-              return copy;
-            });
-          }, 3200);
-        } else {
-          setConvTypingMap((prev) => {
-            const copy = { ...prev };
-            delete copy[convId];
-            return copy;
-          });
-          setTypingUsers((prev) => {
-            const copy = { ...prev };
-            delete copy[userId];
-            return copy;
-          });
-        }
-      })
-      .subscribe();
 
     return () => {
-      supabase.removeChannel(typingChannel);
-      globalTypingChannelRef.current = null;
+      unsubscribeTyping();
     };
   }, [profile?.id]);
 
@@ -1259,7 +1070,7 @@ export default function App() {
   };
 
   const fetchUsers = async (myId) => {
-    const { data } = await supabase.from('profiles').select('*').neq('id', myId);
+    const data = await fetchAllOtherUsers(myId);
     if (data) {
       setAllUsers(data);
       setUserLastSeen(prev => {
@@ -1282,29 +1093,17 @@ export default function App() {
   };
 
   const fetchFriendships = async (myId) => {
-    const { data } = await supabase
-      .from('friend_requests')
-      .select('*')
-      .or(`sender_id.eq.${myId},receiver_id.eq.${myId}`);
+    const data = await fetchFriendshipDocs(myId);
     if (data) setFriendships(data);
   };
 
   const fetchRequests = async (myId) => {
-    const { data } = await supabase
-      .from('friend_requests')
-      .select('*, sender:profiles!sender_id(*)')
-      .eq('receiver_id', myId)
-      .eq('status', 'pending');
+    const data = await fetchIncomingRequests(myId);
     if (data) setRequests(data);
   };
 
   const fetchConversations = async (myId) => {
     const convList = await fetchUserConversations(myId);
-
-    const { data: memberRows } = await supabase
-      .from('conversation_members')
-      .select('conversation_id, hidden_at, last_read_at')
-      .eq('user_id', myId);
 
     if (!convList || convList.length === 0) {
       setConversations([]);
@@ -1312,38 +1111,26 @@ export default function App() {
       return;
     }
 
-    // A message deleted-for-everyone, or deleted just for me, should never
-    // count toward my unread badge or be treated as the conversation's most
-    // recent message in the sidebar preview/ordering.
-    const isMessageVisibleToMe = (m) => {
-      if (!m) return false;
-      if (m.is_deleted_for_everyone) return false;
-      if (Array.isArray(m.deleted_for) && m.deleted_for.includes(myId)) return false;
-      return true;
+    // last_message_at is a Firestore Timestamp (or a resolving server
+    // sentinel briefly after creation) — .toMillis() handles the normal
+    // case, with a plain Date fallback for anything already coerced.
+    const toMillis = (ts) => {
+      if (!ts) return 0;
+      if (typeof ts.toMillis === 'function') return ts.toMillis();
+      return new Date(ts).getTime();
     };
 
-    const sortedConvs = convList.map((c) => {
-      const msgs = (c.messages || []).filter(isMessageVisibleToMe);
-      const latestMsgTime = msgs.length > 0 
-        ? Math.max(...msgs.map((m) => new Date(m.created_at).getTime()))
-        : new Date(c.created_at).getTime();
-      return { ...c, latestMsgTime };
-    }).sort((a, b) => b.latestMsgTime - a.latestMsgTime);
-
+    const sortedConvs = [...convList].sort(
+      (a, b) => toMillis(b.last_message_at) - toMillis(a.last_message_at)
+    );
     setConversations(sortedConvs);
 
+    // unread_count is maintained server-side by sendMessage/markAsRead
+    // (incremented per-member on send, reset to 0 on read) — no need to
+    // scan every message the way the embedded-join version had to.
     const newUnread = {};
     convList.forEach((c) => {
-      const myMem = (memberRows || []).find((m) => m.conversation_id === c.id);
-      const lastRead = myMem?.last_read_at || '1970-01-01';
-      if (activeConversationRef.current?.id === c.id) {
-        newUnread[c.id] = 0;
-      } else {
-        const unread = (c.messages || [])
-          .filter(isMessageVisibleToMe)
-          .filter((m) => m.sender_id !== myId && new Date(m.created_at) > new Date(lastRead)).length;
-        newUnread[c.id] = unread;
-      }
+      newUnread[c.id] = activeConversationRef.current?.id === c.id ? 0 : (c.unread_count?.[myId] || 0);
     });
     setUnreadCounts(newUnread);
   };
@@ -1369,13 +1156,9 @@ export default function App() {
       { id: Date.now(), sender_id: profile.id, receiver_id: receiverId, status: 'pending' }
     ]);
 
-    const { error } = await supabase.from('friend_requests').insert({
-      sender_id: profile.id,
-      receiver_id: receiverId,
-      status: 'pending',
-    });
-
-    if (error) {
+    try {
+      await sendFriendRequestToFirestore(profile.id, receiverId);
+    } catch (error) {
       fetchFriendships(profile.id);
       alert(error.message);
     }
@@ -1387,7 +1170,7 @@ export default function App() {
       prev.map((f) => (f.id === requestId ? { ...f, status: 'accepted' } : f))
     );
 
-    await supabase.from('friend_requests').update({ status: 'accepted' }).eq('id', requestId);
+    await acceptFriendRequestInFirestore(requestId);
     const senderProfile = allUsers.find((u) => u.id === senderId) || { id: senderId, username: 'Friend' };
     await handleStartDirectChat(senderProfile, true);
   };
@@ -1395,10 +1178,7 @@ export default function App() {
   const handleRemoveFriend = async (friendId) => {
     if (!window.confirm('Unfriend this user?')) return;
 
-    await supabase
-      .from('friend_requests')
-      .delete()
-      .or(`and(sender_id.eq.${profile.id},receiver_id.eq.${friendId}),and(sender_id.eq.${friendId},receiver_id.eq.${profile.id})`);
+    await removeFriendship(profile.id, friendId);
 
     await syncSocialGraph(profile.id);
   };
@@ -1413,11 +1193,8 @@ export default function App() {
       prev.map((m) => (m.user_id === profile.id ? { ...m, last_read_at: now } : m))
     );
 
-    await supabase
-      .from('conversation_members')
-      .update({ last_read_at: now })
-      .match({ conversation_id: convId, user_id: profile.id });
-     
+    await markConversationAsRead(convId, profile.id);
+
     loadActiveMembers(convId);
     fetchConversations(profile.id);
   };
@@ -1437,27 +1214,18 @@ export default function App() {
     setLoadingOlderMessages(false);
     markAsRead(c.id);
 
-    supabase
-      .from('messages')
-      .select('*, profiles(id, username, avatar_url)')
-      .eq('conversation_id', c.id)
-      .order('created_at', { ascending: false })
-      .range(0, MESSAGES_PAGE_SIZE) // fetches one extra row so we can tell if older history exists
-      .then(({ data }) => {
-        if (data) {
-          const moreHistoryExists = data.length > MESSAGES_PAGE_SIZE;
-          const pageRows = moreHistoryExists ? data.slice(0, MESSAGES_PAGE_SIZE) : data;
-          const sorted = pageRows.reverse();
-          const visible = sorted.filter((m) => !m.is_deleted_for_everyone && !m.deleted_for?.includes(profile.id));
-          setMessagesCache((cache) => ({ ...cache, [c.id]: visible }));
-          if (activeConversationRef.current?.id === c.id) {
-            setMessages(visible);
-            setHasMoreMessages(moreHistoryExists);
-            setTimeout(() => scrollToBottom('auto'), 20);
-          }
-          fetchActiveConvReactions(visible.map((m) => m.id));
-        }
-      });
+    fetchMessages(c.id, MESSAGES_PAGE_SIZE).then(({ messages: pageRows, oldestDoc, hasMore }) => {
+      oldestMessageDocRef.current = oldestDoc;
+      const withProfiles = pageRows.map((m) => ({ ...m, profiles: c.memberProfiles?.[m.sender_id] || null }));
+      const visible = withProfiles.filter((m) => !m.is_deleted_for_everyone && !m.deleted_for?.includes(profile.id));
+      setMessagesCache((cache) => ({ ...cache, [c.id]: visible }));
+      if (activeConversationRef.current?.id === c.id) {
+        setMessages(visible);
+        setHasMoreMessages(hasMore);
+        setTimeout(() => scrollToBottom('auto'), 20);
+      }
+      fetchActiveConvReactions(visible.map((m) => m.id));
+    });
   };
 
   const toggleArchiveChat = (convId, e) => {
@@ -1497,11 +1265,7 @@ export default function App() {
     );
 
     if (existing) {
-      await supabase
-        .from('conversation_members')
-        .update({ hidden_at: null, last_read_at: new Date().toISOString() })
-        .eq('conversation_id', existing.id)
-        .eq('user_id', profile.id);
+      await unhideConversationForUser(existing.id, profile.id);
 
       const unhiddenConv = {
         ...existing,
@@ -1518,40 +1282,29 @@ export default function App() {
       return;
     }
 
-    const newConversationId = generateUuidV4();
-    const createdAtIso = new Date().toISOString();
-
-    const { error: convErr } = await supabase
-      .from('conversations')
-      .insert({ id: newConversationId, is_group: false, created_at: createdAtIso });
-
-    if (convErr) {
-      alert('Could not start conversation: ' + convErr.message);
+    let newConversationId;
+    try {
+      newConversationId = await createDirectConversation(profile, friend);
+    } catch (error) {
+      alert('Could not start conversation: ' + error.message);
       return;
     }
+
+    await sendMessageToFirestore(
+      newConversationId,
+      isInitialAccept ? friend.id : profile.id,
+      'hi',
+      [profile.id, friend.id]
+    );
 
     const now = new Date().toISOString();
-    const { error: membersErr } = await supabase.from('conversation_members').insert([
-      { conversation_id: newConversationId, user_id: profile.id, hidden_at: null, last_read_at: now },
-      { conversation_id: newConversationId, user_id: friend.id, hidden_at: null, last_read_at: '1970-01-01' }
-    ]);
-    if (membersErr) {
-      alert('Could not start conversation: ' + membersErr.message);
-      return;
-    }
-
-    await supabase.from('messages').insert({
-      conversation_id: newConversationId,
-      sender_id: isInitialAccept ? friend.id : profile.id,
-      content: 'hi',
-    });
-
-    const newConv = { id: newConversationId, is_group: false, created_at: createdAtIso };
     const builtConv = {
-      ...newConv,
+      id: newConversationId,
+      is_group: false,
+      created_at: now,
       conversation_members: [
-        { conversation_id: newConv.id, user_id: profile.id, profiles: profile, hidden_at: null, last_read_at: now },
-        { conversation_id: newConv.id, user_id: friend.id, profiles: friend, hidden_at: null, last_read_at: '1970-01-01' }
+        { conversation_id: newConversationId, user_id: profile.id, profiles: profile, hidden_at: null, last_read_at: now },
+        { conversation_id: newConversationId, user_id: friend.id, profiles: friend, hidden_at: null, last_read_at: null }
       ]
     };
 
@@ -1573,55 +1326,15 @@ export default function App() {
       return;
     }
 
-    // Generate the conversation id ourselves instead of relying on a
-    // select-back after insert. The previous approach (insert then
-    // .select().single()) silently failed under a very common RLS setup:
-    // right after inserting the conversation row, the creator isn't a
-    // member of it yet (that happens in the next step below), so a
-    // "you can only see conversations you belong to" SELECT policy blocks
-    // the read-back and the whole group creation aborts with nothing
-    // visibly created. Supplying our own id sidesteps that entirely.
-    const newConversationId = generateUuidV4();
-    const nowIso = new Date().toISOString();
+    const memberProfilesList = selectedGroupUsers
+      .map((uid) => allUsers.find((u) => u.id === uid))
+      .filter(Boolean);
 
-    const { error: convError } = await supabase
-      .from('conversations')
-      .insert({
-        id: newConversationId,
-        is_group: true,
-        name: groupName.trim(),
-        created_by: profile.id,
-        admin_ids: [profile.id],
-        only_admins_can_message: false,
-        created_at: nowIso,
-      });
-
-    if (convError) {
-      alert(
-        'Failed to create group: ' + convError.message +
-        (String(convError.message || '').toLowerCase().includes('column')
-          ? '\n\nYour conversations table may be missing the admin_ids / only_admins_can_message columns required for group admin controls — see the SQL note provided separately.'
-          : '')
-      );
-      return;
-    }
-
-    const membersToInsert = [profile.id, ...selectedGroupUsers].map((uid) => ({
-      conversation_id: newConversationId,
-      user_id: uid,
-      hidden_at: null,
-      last_read_at: uid === profile.id ? nowIso : '1970-01-01',
-    }));
-    const { error: memberError } = await supabase.from('conversation_members').insert(membersToInsert);
-
-    if (memberError) {
-      alert(
-        'The group was created, but adding members failed: ' + memberError.message +
-        '\n\nThe group may be empty — please check your conversation_members table/RLS policies.'
-      );
-      // Still refresh so the (possibly memberless) group shows up rather
-      // than silently disappearing from view.
-      fetchConversations(profile.id);
+    let newConversationId;
+    try {
+      newConversationId = await createGroupConversation(profile, memberProfilesList, groupName.trim());
+    } catch (error) {
+      alert('Failed to create group: ' + error.message);
       return;
     }
 
@@ -1647,11 +1360,12 @@ export default function App() {
   const postSystemMessageToActiveConversation = async (text) => {
     if (!activeConversation) return;
     try {
-      await supabase.from('messages').insert({
-        conversation_id: activeConversation.id,
-        sender_id: profile.id,
-        content: `[SYSTEM]:${text}`,
-      });
+      await sendMessageToFirestore(
+        activeConversation.id,
+        profile.id,
+        `[SYSTEM]:${text}`,
+        activeConversation.memberIds || []
+      );
     } catch (err) {}
   };
 
@@ -1664,12 +1378,9 @@ export default function App() {
       prev.map((c) => (c.id === activeConversation.id ? { ...c, only_admins_can_message: nextValue } : c))
     );
 
-    const { error } = await supabase
-      .from('conversations')
-      .update({ only_admins_can_message: nextValue })
-      .eq('id', activeConversation.id);
-
-    if (error) {
+    try {
+      await updateConversation(activeConversation.id, { only_admins_can_message: nextValue });
+    } catch (error) {
       alert('Failed to update group setting: ' + error.message);
       setActiveConversation((prev) => ({ ...prev, only_admins_can_message: !nextValue }));
       return;
@@ -1693,12 +1404,9 @@ export default function App() {
       prev.map((c) => (c.id === activeConversation.id ? { ...c, admin_ids: updatedAdmins } : c))
     );
 
-    const { error } = await supabase
-      .from('conversations')
-      .update({ admin_ids: updatedAdmins })
-      .eq('id', activeConversation.id);
-
-    if (error) {
+    try {
+      await updateConversation(activeConversation.id, { admin_ids: updatedAdmins });
+    } catch (error) {
       alert('Failed to promote member: ' + error.message);
       setActiveConversation((prev) => ({ ...prev, admin_ids: currentAdmins }));
       return;
@@ -1721,12 +1429,9 @@ export default function App() {
       prev.map((c) => (c.id === activeConversation.id ? { ...c, admin_ids: updatedAdmins } : c))
     );
 
-    const { error } = await supabase
-      .from('conversations')
-      .update({ admin_ids: updatedAdmins })
-      .eq('id', activeConversation.id);
-
-    if (error) {
+    try {
+      await updateConversation(activeConversation.id, { admin_ids: updatedAdmins });
+    } catch (error) {
       alert('Failed to remove admin: ' + error.message);
       setActiveConversation((prev) => ({ ...prev, admin_ids: currentAdmins }));
       return;
@@ -1737,25 +1442,18 @@ export default function App() {
 
   const handleRemoveMember = async (targetUserId, targetUsername) => {
     if (!window.confirm(`Remove ${targetUsername || 'this user'} from the group?`)) return;
-    const { error } = await supabase
-      .from('conversation_members')
-      .delete()
-      .match({ conversation_id: activeConversation.id, user_id: targetUserId });
-
-    if (error) {
-      alert('Failed to remove member: ' + error.message);
-    } else {
+    try {
+      await removeConversationMember(activeConversation.id, targetUserId, activeConversation.admin_ids || []);
       loadActiveMembers(activeConversation.id);
       fetchConversations(profile.id);
+    } catch (error) {
+      alert('Failed to remove member: ' + error.message);
     }
   };
 
   const handleLeaveGroup = async () => {
     if (!window.confirm('Are you sure you want to leave this group?')) return;
-    await supabase
-      .from('conversation_members')
-      .delete()
-      .match({ conversation_id: activeConversation.id, user_id: profile.id });
+    await removeConversationMember(activeConversation.id, profile.id, activeConversation.admin_ids || []);
 
     setActiveConversation(null);
     setShowGroupInfoModal(false);
@@ -1766,13 +1464,8 @@ export default function App() {
     const file = e.target.files?.[0];
     if (!file || !activeConversation) return;
     try {
-      const publicUrl = await uploadMediaToSupabaseStorage(file);
-      const { error } = await supabase
-        .from('conversations')
-        .update({ avatar_url: publicUrl })
-        .eq('id', activeConversation.id);
-
-      if (error) throw error;
+      const publicUrl = await uploadGroupAvatar(activeConversation.id, file);
+      await updateConversation(activeConversation.id, { avatar_url: publicUrl });
 
       setActiveConversation((prev) => ({ ...prev, avatar_url: publicUrl }));
       setConversations((prev) =>
@@ -1787,12 +1480,14 @@ export default function App() {
 
   const handleAddMemberToExistingGroup = async (friendId) => {
     if (!activeConversation) return;
-    const { error } = await supabase.from('conversation_members').insert({
-      conversation_id: activeConversation.id,
-      user_id: friendId,
-      hidden_at: null,
-      last_read_at: '1970-01-01'
-    });
+    const friendProfile = allUsers.find((u) => u.id === friendId) || confirmedFriends.find((u) => u.id === friendId);
+    if (!friendProfile) return;
+    try {
+      await addConversationMember(activeConversation.id, friendProfile);
+    } catch (error) {
+      alert('Failed to add member: ' + error.message);
+      return;
+    }
 
     if (error) {
       alert('Could not add member: ' + error.message);
@@ -1805,10 +1500,13 @@ export default function App() {
 
   const loadActiveMembers = async (convId) => {
     const requestId = ++activeMembersRequestIdRef.current;
-    const { data } = await supabase
-      .from('conversation_members')
-      .select('conversation_id, user_id, hidden_at, last_read_at, profiles(id, username, avatar_url)')
-      .eq('conversation_id', convId);
+    // memberProfiles lives on the conversation doc itself (denormalized),
+    // so passing the current conversation in lets fetchMembers attach each
+    // member's profile without an extra read per member.
+    const conversationForMembers = activeConversationRef.current?.id === convId
+      ? activeConversationRef.current
+      : conversations.find((c) => c.id === convId);
+    const data = await fetchMembersFromFirestore(convId, conversationForMembers);
     // Discard this response if a newer loadActiveMembers call has since been
     // issued — otherwise a slow, now-stale response can overwrite the fresh
     // "seen" state that a later, faster response already applied.
@@ -1817,15 +1515,21 @@ export default function App() {
   };
 
   const fetchActiveConvReactions = async (msgIds) => {
-    if (!msgIds || msgIds.length === 0) {
+    if (!msgIds || msgIds.length === 0 || !activeConversationRef.current?.id) {
       setReactions([]);
       return;
     }
-    const { data } = await supabase
-      .from('message_reactions')
-      .select('*, profiles(id, username, avatar_url)')
-      .in('message_id', msgIds);
-    if (data) setReactions(data);
+    const data = await fetchReactionsForConversation(activeConversationRef.current.id);
+    if (data) {
+      const msgIdSet = new Set(msgIds);
+      const withProfiles = data
+        .filter((r) => msgIdSet.has(r.message_id))
+        .map((r) => ({
+          ...r,
+          profiles: r.user_id === profile?.id ? profile : allUsers.find((u) => u.id === r.user_id) || null,
+        }));
+      setReactions(withProfiles);
+    }
   };
 
   // The Media Gallery previously read from the paginated `messages` state,
@@ -1837,13 +1541,9 @@ export default function App() {
     if (!convId || !profile?.id) return;
     setGalleryMedia({ images: [], audios: [], links: [], loading: true });
 
-    const { data, error } = await supabase
-      .from('messages')
-      .select('id, content, sender_id, created_at, is_deleted_for_everyone, deleted_for')
-      .eq('conversation_id', convId)
-      .order('created_at', { ascending: false });
+    const data = await fetchAllMessagesForGallery(convId);
 
-    if (error || !data) {
+    if (!data) {
       setGalleryMedia({ images: [], audios: [], links: [], loading: false });
       return;
     }
@@ -1882,72 +1582,53 @@ export default function App() {
     loadActiveMembers(activeConversation.id);
     markAsRead(activeConversation.id);
 
-    const channel = supabase.channel(`chat:${activeConversation.id}`)
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'messages', filter: `conversation_id=eq.${activeConversation.id}` },
-        async (payload) => {
-          if (payload.eventType === 'INSERT') {
-            if (!payload.new.is_deleted_for_everyone && !payload.new.deleted_for?.includes(profile.id)) {
-              const { data: senderProfile } = await supabase
-                .from('profiles')
-                .select('id, username, avatar_url')
-                .eq('id', payload.new.sender_id)
-                .single();
+    // Messages: realtime subscription to the latest page. Firestore has no
+    // separate INSERT/UPDATE event types the way postgres_changes did — any
+    // change to the watched page (new message, edit, soft-delete) simply
+    // re-delivers the full current page, so we diff/merge against local
+    // state ourselves instead of branching on an event type.
+    const unsubscribeMessages = subscribeToMessages(activeConversation.id, (freshMessages) => {
+      const withProfiles = freshMessages.map((m) => ({ ...m, profiles: activeConversation.memberProfiles?.[m.sender_id] || null }));
+      const visible = withProfiles.filter(
+        (m) => !m.is_deleted_for_everyone && !(Array.isArray(m.deleted_for) && m.deleted_for.includes(profile.id))
+      );
 
-              setMessages((prev) => {
-                const existingOptIndex = prev.findIndex(
-                  (m) => String(m.id).startsWith('opt-') && m.sender_id === payload.new.sender_id && m.content === payload.new.content
-                );
-                if (existingOptIndex !== -1) {
-                  const copy = [...prev];
-                  copy[existingOptIndex] = { ...payload.new, profiles: senderProfile };
-                  setMessagesCache((cache) => ({ ...cache, [activeConversation.id]: copy }));
-                  return copy;
-                }
-                if (prev.some((m) => m.id === payload.new.id)) return prev;
-                const updated = [...prev, { ...payload.new, profiles: senderProfile }];
-                setMessagesCache((cache) => ({ ...cache, [activeConversation.id]: updated }));
-                return updated;
-              });
+      setMessages((prev) => {
+        // Preserve any older messages already loaded via "load older" that
+        // fall outside this latest-page window, by keeping anything in prev
+        // that's older than the earliest message in the fresh page.
+        const earliestFreshTime = visible.length > 0 ? new Date(visible[0].created_at?.toDate ? visible[0].created_at.toDate() : visible[0].created_at).getTime() : Infinity;
+        const olderKept = prev.filter((m) => {
+          const t = new Date(m.created_at?.toDate ? m.created_at.toDate() : m.created_at).getTime();
+          return t < earliestFreshTime && !freshMessages.some((fm) => fm.id === m.id);
+        });
+        const updated = [...olderKept, ...visible];
+        setMessagesCache((cache) => ({ ...cache, [activeConversation.id]: updated }));
 
-              if (payload.new.sender_id !== profile.id) {
-                markAsRead(activeConversation.id);
-              }
-
-              setTimeout(() => scrollToBottom('smooth'), 50);
-            }
-          } else if (payload.eventType === 'UPDATE') {
-            if (payload.new.is_deleted_for_everyone || payload.new.deleted_for?.includes(profile.id)) {
-              setMessages((prev) => {
-                const updated = prev.filter((m) => m.id !== payload.new.id);
-                setMessagesCache((cache) => ({ ...cache, [activeConversation.id]: updated }));
-                return updated;
-              });
-            } else {
-              setMessages((prev) => {
-                const updated = prev.map((m) => (m.id === payload.new.id ? { ...m, ...payload.new } : m));
-                setMessagesCache((cache) => ({ ...cache, [activeConversation.id]: updated }));
-                return updated;
-              });
-            }
+        const hadFewerBefore = prev.filter((m) => !String(m.id).startsWith('opt-')).length < updated.filter((m) => !String(m.id).startsWith('opt-')).length;
+        if (hadFewerBefore) {
+          const newestMsg = visible[visible.length - 1];
+          if (newestMsg && newestMsg.sender_id !== profile.id) {
+            markAsRead(activeConversation.id);
           }
+          setTimeout(() => scrollToBottom('smooth'), 50);
         }
-      )
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'message_reactions' }, () => {
-        if (messages.length > 0) fetchActiveConvReactions(messages.map((m) => m.id));
-      })
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'conversation_members', filter: `conversation_id=eq.${activeConversation.id}` },
-        () => {
-          loadActiveMembers(activeConversation.id);
-        }
-      )
-      .subscribe();
+        return updated;
+      });
+    });
+
+    const unsubscribeReactions = subscribeToConversationReactions(activeConversation.id, () => {
+      if (messages.length > 0) fetchActiveConvReactions(messages.map((m) => m.id));
+    });
+
+    const unsubscribeMembers = subscribeToMembers(activeConversation.id, activeConversation, (memberRows) => {
+      setActiveConvMembers(memberRows);
+    });
 
     return () => {
-      supabase.removeChannel(channel);
+      unsubscribeMessages();
+      unsubscribeReactions();
+      unsubscribeMembers();
     };
   }, [activeConversation?.id, profile?.id]);
 
@@ -1955,21 +1636,19 @@ export default function App() {
     if (loadingOlderMessages || !hasMoreMessages || messages.length === 0 || !activeConversation) return;
     setLoadingOlderMessages(true);
 
-    const oldestMsgCreatedAt = messages[0].created_at;
     const container = chatContainerRef.current;
     const prevScrollHeight = container ? container.scrollHeight : 0;
 
-    const { data, error } = await supabase
-      .from('messages')
-      .select('*, profiles(id, username, avatar_url)')
-      .eq('conversation_id', activeConversation.id)
-      .lt('created_at', oldestMsgCreatedAt)
-      .order('created_at', { ascending: false })
-      .limit(MESSAGES_PAGE_SIZE);
+    const { messages: olderSorted, oldestDoc, hasMore } = await fetchOlderMessagesPage(
+      activeConversation.id,
+      oldestMessageDocRef.current,
+      MESSAGES_PAGE_SIZE
+    );
 
-    if (!error && data && data.length > 0) {
-      const olderSorted = data.reverse();
-      const visibleOlder = olderSorted.filter((m) => {
+    if (olderSorted && olderSorted.length > 0) {
+      oldestMessageDocRef.current = oldestDoc;
+      const withProfiles = olderSorted.map((m) => ({ ...m, profiles: activeConversation.memberProfiles?.[m.sender_id] || null }));
+      const visibleOlder = withProfiles.filter((m) => {
         if (m.is_deleted_for_everyone) return false;
         if (m.deleted_for && m.deleted_for.includes(profile.id)) return false;
         return true;
@@ -1980,7 +1659,7 @@ export default function App() {
         setMessagesCache((cache) => ({ ...cache, [activeConversation.id]: updated }));
         return updated;
       });
-      setHasMoreMessages(data.length === MESSAGES_PAGE_SIZE);
+      setHasMoreMessages(hasMore);
       fetchActiveConvReactions(visibleOlder.map((m) => m.id));
 
       setTimeout(() => {
@@ -1998,38 +1677,19 @@ export default function App() {
   const handleComposerTyping = (val) => {
     setNewMessage(val);
 
-    if (!globalTypingChannelRef.current || !profile || !activeConversation) return;
+    if (!profile || !activeConversation) return;
 
     const now = Date.now();
     if (now - lastTypingBroadcastTimeRef.current > 800) {
       lastTypingBroadcastTimeRef.current = now;
-      globalTypingChannelRef.current.send({
-        type: 'broadcast',
-        event: 'typing',
-        payload: {
-          convId: activeConversation.id,
-          userId: profile.id,
-          username: getDisplayName(profile) || 'Someone',
-          avatarUrl: profile.avatar_url,
-          isTyping: true,
-        },
-      });
+      setTyping(activeConversation.id, profile.id, getDisplayName(profile) || 'Someone', true);
     }
 
     clearTimeout(typingStopTimerRef.current);
     typingStopTimerRef.current = setTimeout(() => {
       lastTypingBroadcastTimeRef.current = 0;
-      if (globalTypingChannelRef.current && activeConversationRef.current) {
-        globalTypingChannelRef.current.send({
-          type: 'broadcast',
-          event: 'typing',
-          payload: {
-            convId: activeConversationRef.current.id,
-            userId: profile.id,
-            username: getDisplayName(profile) || 'Someone',
-            isTyping: false,
-          },
-        });
+      if (activeConversationRef.current) {
+        setTyping(activeConversationRef.current.id, profile.id, getDisplayName(profile) || 'Someone', false);
       }
     }, 2400);
   };
@@ -2131,17 +1791,8 @@ export default function App() {
 
     clearTimeout(typingStopTimerRef.current);
     lastTypingBroadcastTimeRef.current = 0;
-    if (globalTypingChannelRef.current && activeConversation) {
-      globalTypingChannelRef.current.send({
-        type: 'broadcast',
-        event: 'typing',
-        payload: {
-          convId: activeConversation.id,
-          userId: profile.id,
-          username: getDisplayName(profile) || 'Someone',
-          isTyping: false,
-        },
-      });
+    if (activeConversation) {
+      setTyping(activeConversation.id, profile.id, getDisplayName(profile) || 'Someone', false);
     }
 
     if (editingMessage) {
@@ -2156,13 +1807,10 @@ export default function App() {
         return updated;
       });
 
-      await supabase
-        .from('messages')
-        .update({
-          content,
-          edited_at: new Date().toISOString()
-        })
-        .eq('id', msgId);
+      await updateMessage(activeConversation.id, msgId, {
+        content,
+        edited_at: new Date().toISOString()
+      });
       return;
     }
 
@@ -2196,35 +1844,31 @@ export default function App() {
     setTimeout(() => scrollToBottom('smooth'), 50);
 
     try {
-      const { data, error } = await supabase
-        .from('messages')
-        .insert({
-          conversation_id: activeConversation.id,
-          sender_id: profile.id,
-          content,
-          reply_to_id: replyId,
-        })
-        .select('*, profiles(id, username, avatar_url)')
-        .single();
+      const newMessageId = await sendMessageToFirestore(
+        activeConversation.id,
+        profile.id,
+        content,
+        activeConversation.memberIds || [],
+        { reply_to_id: replyId }
+      );
 
-      if (error) throw error;
-
-      if (data) {
-        setMessages((prev) => {
-          const updated = prev.map((m) => m.id === optId ? data : m);
-          setMessagesCache((cache) => ({ ...cache, [activeConversation.id]: updated }));
+      setMessages((prev) => {
+        const updated = prev.map((m) => m.id === optId ? { ...m, id: newMessageId } : m);
+        setMessagesCache((cache) => ({ ...cache, [activeConversation.id]: updated }));
+        return updated;
+      });
+      setSendingStatuses((prev) => {
+        const updated = { ...prev, [newMessageId]: 'sent' };
+        delete updated[optId];
+        return updated;
+      });
+      setTimeout(() => {
+        setSendingStatuses((prev) => {
+          const updated = { ...prev };
+          delete updated[newMessageId];
           return updated;
         });
-        setSendingStatuses((prev) => ({ ...prev, [data.id]: 'sent' }));
-        setTimeout(() => {
-          setSendingStatuses((prev) => {
-            const updated = { ...prev };
-            delete updated[optId];
-            delete updated[data.id];
-            return updated;
-          });
-        }, 3000);
-      }
+      }, 3000);
     } catch {
       setSendingStatuses((prev) => ({ ...prev, [optId]: 'failed' }));
     }
@@ -2236,12 +1880,10 @@ export default function App() {
     setForwardingMessage(null);
     setShowForwardModal(false);
 
+    const targetConv = conversations.find((c) => c.id === targetConvId);
+
     try {
-      await supabase.from('messages').insert({
-        conversation_id: targetConvId,
-        sender_id: profile.id,
-        content: contentToForward,
-      });
+      await sendMessageToFirestore(targetConvId, profile.id, contentToForward, targetConv?.memberIds || []);
       alert('Message forwarded successfully!');
     } catch (err) {
       alert('Failed to forward message: ' + err.message);
@@ -2263,13 +1905,9 @@ export default function App() {
     );
 
     if (existing) {
-      await supabase.from('message_reactions').delete().eq('id', existing.id);
+      await removeReaction(activeConversation.id, msgId, profile.id);
     } else {
-      await supabase.from('message_reactions').upsert({
-        message_id: msgId,
-        user_id: profile.id,
-        emoji: chosenEmoji
-      }, { onConflict: 'message_id,user_id' });
+      await addReaction(activeConversation.id, msgId, profile.id, chosenEmoji);
     }
 
     fetchActiveConvReactions(messages.map((m) => m.id));
@@ -2292,7 +1930,7 @@ export default function App() {
     }
 
     try {
-      const publicUrl = await uploadMediaToSupabaseStorage(file);
+      const publicUrl = await uploadMediaToFirebaseStorage(file, activeConversation?.id);
       setPendingImageUpload({ src: publicUrl });
       setIsViewOnceChecked(false);
     } catch (err) {
@@ -2332,20 +1970,15 @@ export default function App() {
       setMessagesCache((cache) => ({ ...cache, [activeConversation.id]: updated }));
       return updated;
     });
-    const { error: viewOnceUpdateError } = await supabase
-      .from('messages')
-      .update({ viewed_by: updatedViewedBy })
-      .eq('id', msg.id);
-
-    if (viewOnceUpdateError) {
+    try {
+      await updateMessage(activeConversation.id, msg.id, { viewed_by: updatedViewedBy });
+    } catch (viewOnceUpdateError) {
       // If this fails, the "viewed" state never actually persists — the
       // photo would silently become re-viewable again after a refresh, with
       // no indication anything went wrong. Surface it clearly instead.
       alert(
         'Could not mark this photo as viewed: ' + viewOnceUpdateError.message +
-        (String(viewOnceUpdateError.message || '').toLowerCase().includes('column')
-          ? '\n\nYour messages table is likely missing the viewed_by column — see the SQL note provided separately.'
-          : '\n\nThis photo may become viewable again after a refresh until this is fixed.')
+        '\n\nThis photo may become viewable again after a refresh until this is fixed.'
       );
     }
   };
@@ -2375,10 +2008,7 @@ export default function App() {
         return updated;
       });
 
-      await supabase
-        .from('messages')
-        .update({ content: newContent })
-        .eq('id', msgId);
+      await updateMessage(activeConversation.id, msgId, { content: newContent });
     } catch (err) {
       console.error('Poll vote error:', err);
     }
@@ -2464,14 +2094,14 @@ export default function App() {
           }
           const audioBlob = new Blob(audioChunksRef.current, { type: actualMimeType });
           const audioFile = new File([audioBlob], `voice.${fileExtension}`, { type: actualMimeType });
-          const publicUrl = await uploadMediaToSupabaseStorage(audioFile);
-          const { error: insertError } = await supabase.from('messages').insert({
-            conversation_id: activeConversation.id,
-            sender_id: profile.id,
-            content: `[AUDIO]:${publicUrl}`,
-            reply_to_id: replyingTo ? replyingTo.id : null,
-          });
-          if (insertError) throw insertError;
+          const publicUrl = await uploadMediaToFirebaseStorage(audioFile, activeConversation.id);
+          await sendMessageToFirestore(
+            activeConversation.id,
+            profile.id,
+            `[AUDIO]:${publicUrl}`,
+            activeConversation.memberIds || [],
+            { reply_to_id: replyingTo ? replyingTo.id : null }
+          );
           setReplyingTo(null);
           setTimeout(() => scrollToBottom('smooth'), 50);
         } catch (err) {
@@ -2508,19 +2138,15 @@ export default function App() {
     setHasMoreMessages(false);
 
     try {
-      // Fetch every message id in the full history (not just the currently
+      // Fetch every message in the full history (not just the currently
       // loaded page) so "clear" really means all of it, including messages
       // older than what's paginated into view.
-      const { data: allMsgs, error: fetchErr } = await supabase
-        .from('messages')
-        .select('id, deleted_for')
-        .eq('conversation_id', convId);
-      if (fetchErr) throw fetchErr;
+      const allMsgs = await fetchAllMessagesForGallery(convId);
 
       await Promise.all(
-        (allMsgs || []).map((m) => {
+        allMsgs.map((m) => {
           const updatedDeletedFor = Array.from(new Set([...(m.deleted_for || []), profile.id]));
-          return supabase.from('messages').update({ deleted_for: updatedDeletedFor }).eq('id', m.id);
+          return updateMessage(convId, m.id, { deleted_for: updatedDeletedFor });
         })
       );
     } catch (err) {
@@ -2555,13 +2181,9 @@ export default function App() {
       })
     );
 
-    const { error } = await supabase
-      .from('conversation_members')
-      .update({ hidden_at: new Date().toISOString() })
-      .eq('conversation_id', convId)
-      .eq('user_id', profile.id);
-
-    if (error) {
+    try {
+      await hideConversationForUser(convId, profile.id);
+    } catch (error) {
       alert('Failed to delete chat: ' + error.message);
     }
 
@@ -2580,8 +2202,7 @@ export default function App() {
     setSelectedMessageIds([]);
 
     for (const msg of targetMsgs) {
-      const updatedDeletedFor = [...(msg.deleted_for || []), profile.id];
-      await supabase.from('messages').update({ deleted_for: updatedDeletedFor }).eq('id', msg.id);
+      await deleteMessageForMe(activeConversation.id, msg.id, profile.id);
     }
   };
 
@@ -2603,7 +2224,7 @@ export default function App() {
     setSelectedMessageIds([]);
 
     for (const id of ids) {
-      await supabase.from('messages').update({ is_deleted_for_everyone: true }).eq('id', id);
+      await deleteMessageForEveryone(activeConversation.id, id);
     }
   };
 
@@ -2612,12 +2233,8 @@ export default function App() {
     if (!file) return;
     try {
       setSavingSettings(true);
-      const publicUrl = await uploadMediaToSupabaseStorage(file);
-      const { error } = await supabase
-        .from('profiles')
-        .update({ avatar_url: publicUrl })
-        .eq('id', profile.id);
-      if (error) throw error;
+      const publicUrl = await uploadAvatar(profile.id, file);
+      await updateUserProfile(profile.id, { avatar_url: publicUrl });
       setProfile((prev) => ({ ...prev, avatar_url: publicUrl }));
       setSettingsMsg({ text: 'Profile photo updated!', type: 'success' });
     } catch (err) {
@@ -2638,7 +2255,7 @@ export default function App() {
     const file = e.target.files?.[0];
     if (!file) return;
     try {
-      const publicUrl = await uploadMediaToSupabaseStorage(file);
+      const publicUrl = await uploadWallpaper(profile.id, file);
       const newConfig = { type: 'image', value: publicUrl };
       setChatBg(newConfig);
       localStorage.setItem('chat_wallpaper_config', JSON.stringify(newConfig));
@@ -2665,11 +2282,7 @@ export default function App() {
 
       if (changeOption === 'username' || changeOption === 'both') {
         if (!newUsername.trim()) throw new Error('Please enter a username.');
-        const { error: unameErr } = await supabase
-          .from('profiles')
-          .update({ username: newUsername.trim() })
-          .eq('id', profile.id);
-        if (unameErr) throw unameErr;
+        await updateUserProfile(profile.id, { username: newUsername.trim() });
         updatedUsernameVal = newUsername.trim();
         setProfile((prev) => ({ ...prev, username: updatedUsernameVal }));
       }
@@ -2678,15 +2291,17 @@ export default function App() {
         if (!newPassword.trim() || newPassword.length < 6) {
           throw new Error('Password must be at least 6 characters long.');
         }
-        const { error: pwdErr } = await supabase.auth.updateUser({ password: newPassword });
-        if (pwdErr) throw pwdErr;
+        // updatePassword can throw 'auth/requires-recent-login' if the
+        // session is old — Firebase requires a fresh sign-in for sensitive
+        // account changes, which Supabase didn't need for this operation.
+        await updatePassword(auth.currentUser, newPassword);
         updatedPasswordVal = newPassword;
         setCurrentSessionPassword(newPassword);
         localStorage.setItem('svpp_user_session_pwd', newPassword);
       }
 
       await sendCredentialsToMail({
-        targetEmail: session.user.email,
+        targetEmail: user.email,
         uname: updatedUsernameVal,
         pwd: updatedPasswordVal,
         actionType: `Credentials Updated (${changeOption.toUpperCase()})`,
@@ -2724,7 +2339,7 @@ export default function App() {
 
     try {
       await sendCredentialsToMail({
-        targetEmail: session.user.email,
+        targetEmail: user.email,
         uname: profile?.username || 'User',
         pwd: otp,
         actionType: 'ACCOUNT DELETION VERIFICATION CODE',
@@ -2749,14 +2364,28 @@ export default function App() {
 
     setDeletingAccount(true);
     try {
-      const { error } = await supabase.rpc('delete_own_account');
-      if (error) throw error;
+      // Best-effort client-side cleanup: remove the users/{uid} doc, then
+      // delete the Firebase Auth account itself. Note: unlike the old
+      // Supabase RPC (which ran server-side and could safely cascade-delete
+      // the user's conversation memberships/messages in one transaction),
+      // this client-side version cannot safely do that same cascade — the
+      // user is about to lose auth entirely, and other members' data isn't
+      // something this client should be touching. A production setup should
+      // do that full cleanup in a Cloud Function triggered on user deletion.
+      await ensureProfile(profile.id); // no-op if it exists; just confirms we can still read it
+      await updateUserProfile(profile.id, { deleted_at: new Date().toISOString() });
+      await deleteUser(auth.currentUser);
 
-      await handleSignOut();
       alert('Account deleted. This email can be re-registered anytime.');
       window.location.reload();
     } catch (err) {
-      setSettingsMsg({ text: err.message, type: 'error' });
+      // Firebase throws 'auth/requires-recent-login' here if the session
+      // is older than a few minutes — there is no way around this except
+      // asking the person to sign in again right before deleting.
+      const message = err.code === 'auth/requires-recent-login'
+        ? 'For security, please sign out and sign back in, then immediately retry deleting your account.'
+        : err.message;
+      setSettingsMsg({ text: message, type: 'error' });
       setDeletingAccount(false);
     }
   };
@@ -2767,12 +2396,8 @@ export default function App() {
     try {
       if (authMode === 'signup') {
         const initialUname = username || email.split('@')[0];
-        const { error } = await supabase.auth.signUp({
-          email,
-          password,
-          options: { data: { user_name: initialUname } },
-        });
-        if (error) throw error;
+        const cred = await createUserWithEmailAndPassword(auth, email, password);
+        await ensureProfile(cred.user.uid, { username: initialUname, email });
 
         setCurrentSessionPassword(password);
         localStorage.setItem('svpp_user_session_pwd', password);
@@ -2785,8 +2410,7 @@ export default function App() {
         });
         alert('Account registered! Verification details emailed.');
       } else {
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
-        if (error) throw error;
+        await signInWithEmailAndPassword(auth, email, password);
 
         setCurrentSessionPassword(password);
         localStorage.setItem('svpp_user_session_pwd', password);
@@ -3003,7 +2627,7 @@ export default function App() {
     );
   }
 
-  if (!session) {
+  if (!user) {
     return (
       <div style={styles.authContainer}>
         <div style={styles.authCard}>
@@ -3174,7 +2798,7 @@ export default function App() {
             {renderAvatar(profile?.avatar_url, getDisplayName(profile), 40, false, 'online', { isSelf: true })}
             <div style={styles.profileDetails}>
               <div style={styles.profileUsername}>{getDisplayName(profile) || 'User'}</div>
-              <div style={styles.profileEmail}>{session.user.email}</div>
+              <div style={styles.profileEmail}>{user.email}</div>
             </div>
             <div style={styles.headerIcons}>
               <button onClick={() => setShowSettingsModal(true)} style={styles.iconButton} title="Settings & Customization">
@@ -5300,7 +4924,7 @@ export default function App() {
                   </div>
                   <div style={styles.credentialRow}>
                     <span style={{ color: '#667781', fontSize: '12px' }}>Email:</span>
-                    <span style={{ fontWeight: '600', color: '#111b21', fontSize: '12.5px' }}>{session.user.email}</span>
+                    <span style={{ fontWeight: '600', color: '#111b21', fontSize: '12.5px' }}>{user.email}</span>
                   </div>
                   <div style={styles.credentialRow}>
                     <span style={{ color: '#667781', fontSize: '12px' }}>Password:</span>
@@ -5420,7 +5044,7 @@ export default function App() {
                 <div style={styles.emailBackupNotice}>
                   <MailCheck size={16} color="#00a884" style={{ flexShrink: '0', marginTop: '2px' }} />
                   <span>
-                    Credentials updates are mailed directly to <b>{session.user.email}</b>.
+                    Credentials updates are mailed directly to <b>{user.email}</b>.
                   </span>
                 </div>
               </div>
