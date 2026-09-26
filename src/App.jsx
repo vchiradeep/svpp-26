@@ -3478,409 +3478,409 @@ export default function App() {
                   </div>
                 )}
 
-                {messages.map((m, mIdx) => {
-                  const isSystem = m.content?.startsWith('[SYSTEM]:');
-                  if (isSystem) {
+                {/* 48-Hour Message Filter Wrapper */}
+                {(() => {
+                  const visibleMessages = messages.filter((msg) => {
+                    if (!msg.created_at) return true;
+                    const msgDate = parseSafeDate(msg.created_at);
+                    const now = new Date();
+                    const hoursDifference = (now - msgDate) / (1000 * 60 * 60);
+                    return hoursDifference <= 48; // Keeps only today and yesterday
+                  });
+
+                  return visibleMessages.map((m, mIdx) => {
+                    const isSystem = m.content?.startsWith('[SYSTEM]:');
+                    if (isSystem) {
+                      return (
+                        <div key={m.id} style={styles.chatSystemMessageRow}>
+                          <div style={styles.chatSystemMessageBubble}>
+                            {m.content.replace('[SYSTEM]:', '').trim()}
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    const isMe = m.sender_id === profile?.id;
+                    const time = parseSafeDate(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                    const msgKind = getMessageKind(m.content);
+                    const isImage = msgKind === 'image';
+                    const isViewOnceImg = msgKind === 'view-once';
+                    const isAudio = msgKind === 'audio';
+                    const isPoll = msgKind === 'poll';
+                    const youtubeId = msgKind === 'youtube' ? extractYouTubeId(m.content) : null;
+
+                    const isHovered = hoveredMessageId === m.id;
+                    const isTapped = tappedMessageId === m.id;
+                    const showQuickEmoji = isHovered || (isMobile && isTapped);
+                    const isMenuOpen = openMessageMenuId === m.id;
+                    const isSelectedForBatch = selectedMessageIds.includes(m.id);
+                    const msgReactions = reactions.filter((r) => r.message_id === m.id);
+                    const repliedMsg = m.reply_to || (m.reply_to_id ? messages.find((x) => x.id === m.reply_to_id) : null);
+
+                    const viewedByArr = m.viewed_by || [];
+                    const hasAlreadyOpened = viewedByArr.includes(profile.id);
+
+                    const currentDateLabel = getMessageDateLabel(m.created_at);
+                    const prevMessage = mIdx > 0 ? visibleMessages[mIdx - 1] : null;
+                    const prevDateLabel = prevMessage ? getMessageDateLabel(prevMessage.created_at) : null;
+                    const showDateHeader = currentDateLabel !== prevDateLabel;
+
+                    const rawContent = m.content || '';
+                    const mediaUrl = isImage ? rawContent.replace('[IMAGE]:', '') : isViewOnceImg ? rawContent.replace('[VIEW-ONCE]:', '') : isAudio ? rawContent.replace('[AUDIO]:', '') : '';
+
                     return (
-                      <div key={m.id} style={styles.chatSystemMessageRow}>
-                        <div style={styles.chatSystemMessageBubble}>
-                          {m.content.replace('[SYSTEM]:', '').trim()}
-                        </div>
-                      </div>
-                    );
-                  }
-
-                  const isMe = m.sender_id === profile?.id;
-                  const time = parseSafeDate(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                  const msgKind = getMessageKind(m.content);
-                  const isImage = msgKind === 'image';
-                  const isViewOnceImg = msgKind === 'view-once';
-                  const isAudio = msgKind === 'audio';
-                  const isPoll = msgKind === 'poll';
-                  const youtubeId = msgKind === 'youtube' ? extractYouTubeId(m.content) : null;
-
-                  const isHovered = hoveredMessageId === m.id;
-                  const isTapped = tappedMessageId === m.id;
-                  const showQuickEmoji = isHovered || (isMobile && isTapped);
-                  const isMenuOpen = openMessageMenuId === m.id;
-                  const isSelectedForBatch = selectedMessageIds.includes(m.id);
-                  const msgReactions = reactions.filter((r) => r.message_id === m.id);
-                  const repliedMsg = m.reply_to || (m.reply_to_id ? messages.find((x) => x.id === m.reply_to_id) : null);
-
-                  const viewedByArr = m.viewed_by || [];
-                  const hasAlreadyOpened = viewedByArr.includes(profile.id);
-
-                  const currentDateLabel = getMessageDateLabel(m.created_at);
-                  const prevMessage = mIdx > 0 ? messages[mIdx - 1] : null;
-                  const prevDateLabel = prevMessage ? getMessageDateLabel(prevMessage.created_at) : null;
-                  const showDateHeader = currentDateLabel !== prevDateLabel;
-
-                  const rawContent = m.content || '';
-                  const mediaUrl = isImage ? rawContent.replace('[IMAGE]:', '') : isViewOnceImg ? rawContent.replace('[VIEW-ONCE]:', '') : isAudio ? rawContent.replace('[AUDIO]:', '') : '';
-
-                  return (
-                    <React.Fragment key={m.id}>
-                      {showDateHeader && (
-                        <div style={styles.chatDateDivider}>
-                          <span style={styles.chatDateDividerBadge}>{currentDateLabel}</span>
-                        </div>
-                      )}
-
-                      <div
-                        onMouseEnter={() => setHoveredMessageId(m.id)}
-                        onMouseLeave={() => {
-                          setHoveredMessageId(null);
-                          // Intentionally NOT closing the reaction picker here.
-                          // It opens on click, so it should close on click
-                          // (elsewhere) too — not on hover-out. The popup and
-                          // its extended emoji grid render as separate floating
-                          // boxes above the row; moving the cursor between them
-                          // genuinely passes outside the row's hover area for a
-                          // moment, which was closing the picker mid-hover.
-                        }}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (selectedMessageIds.length > 0) {
-                            setSelectedMessageIds((prev) => 
-                              prev.includes(m.id) ? prev.filter(id => id !== m.id) : [...prev, m.id]
-                            );
-                          } else if (isMobile) {
-                            setTappedMessageId(tappedMessageId === m.id ? null : m.id);
-                          }
-                        }}
-                        style={{
-                          ...styles.messageRow,
-                          justifyContent: isMe ? 'flex-end' : 'flex-start',
-                          backgroundColor: isSelectedForBatch ? 'rgba(0,168,132,0.12)' : 'transparent',
-                          borderRadius: '8px',
-                          padding: isSelectedForBatch ? '4px' : '0'
-                        }}
-                      >
-                        {!isMe && activeConversation.is_group && (
-                          renderAvatar(m.profiles?.avatar_url, m.profiles?.username, 28, false, 'online', { userProfile: m.profiles }, true)
+                      <React.Fragment key={m.id}>
+                        {showDateHeader && (
+                          <div style={styles.chatDateDivider}>
+                            <span style={styles.chatDateDividerBadge}>{currentDateLabel}</span>
+                          </div>
                         )}
-                         
-                        <div style={styles.messageBubbleWrapper}>
-                          {activeConversation.is_group && !isMe && (
-                            <div style={styles.bubbleSenderName}>{getDisplayName(m.profiles) || 'Account deleted'}</div>
+
+                        <div
+                          onMouseEnter={() => setHoveredMessageId(m.id)}
+                          onMouseLeave={() => {
+                            setHoveredMessageId(null);
+                          }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (selectedMessageIds.length > 0) {
+                              setSelectedMessageIds((prev) => 
+                                prev.includes(m.id) ? prev.filter(id => id !== m.id) : [...prev, m.id]
+                              );
+                            } else if (isMobile) {
+                              setTappedMessageId(tappedMessageId === m.id ? null : m.id);
+                            }
+                          }}
+                          style={{
+                            ...styles.messageRow,
+                            justifyContent: isMe ? 'flex-end' : 'flex-start',
+                            backgroundColor: isSelectedForBatch ? 'rgba(0,168,132,0.12)' : 'transparent',
+                            borderRadius: '8px',
+                            padding: isSelectedForBatch ? '4px' : '0'
+                          }}
+                        >
+                          {!isMe && activeConversation.is_group && (
+                            renderAvatar(m.profiles?.avatar_url, m.profiles?.username, 28, false, 'online', { userProfile: m.profiles }, true)
                           )}
-
-                          <div style={{ display: 'flex', alignItems: 'center', position: 'relative', flexDirection: isMe ? 'row-reverse' : 'row' }}>
-                             
-                            <div
-                              style={{
-                                ...styles.bubble,
-                                backgroundColor: isMe ? '#d9fdd3' : '#ffffff',
-                                color: '#111b21',
-                                borderBottomRightRadius: isMe ? '2px' : '8px',
-                                borderBottomLeftRadius: isMe ? '8px' : '2px',
-                                padding: (isImage || isViewOnceImg) ? '4px' : '8px 28px 6px 12px',
-                                minWidth: isPoll ? '260px' : youtubeId ? '240px' : 'auto',
-                              }}
-                            >
-                              {/* WhatsApp style hover chevron arrow positioned inside top-right */}
-                              {isHovered && (
-                                <button
-                                  data-floating-ui="message-chevron-trigger"
-                                  className="chevron-hover-btn"
-                                  onClick={(e) => handleToggleMessageMenu(e, m.id)}
-                                  style={styles.messageChevronBtn}
-                                  title="Message Options"
-                                >
-                                  <ChevronDown size={15} color="currentColor" className="chevron-hover-icon" />
-                                </button>
-                              )}
-
-                              {repliedMsg && (
-                                <div style={{
-                                  ...styles.replyQuoteBox,
-                                  borderLeftColor: isMe ? '#00a884' : '#128c7e',
-                                  backgroundColor: isMe ? 'rgba(0,168,132,0.1)' : '#f0f2f5'
-                                }}>
-                                  <div style={{ fontSize: '11px', fontWeight: '700', color: isMe ? '#00a884' : '#128c7e' }}>
-                                    {getDisplayName(repliedMsg.profiles) || 'User'}
-                                  </div>
-                                  <div style={{ fontSize: '11px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', opacity: 0.85 }}>
-                                    {getMessagePreviewLabel(repliedMsg.content)}
-                                  </div>
-                                </div>
-                              )}
-
-                              {isViewOnceImg ? (
-                                <div 
-                                  onClick={() => handleOpenViewOnce(m)}
-                                  style={{
-                                    ...styles.viewOnceBubbleCard,
-                                    opacity: (hasAlreadyOpened || isMe) ? 0.6 : 1,
-                                    cursor: isMe ? 'default' : 'pointer'
-                                  }}
-                                  title={isMe ? "You sent this view-once photo" : "Tap to open"}
-                                >
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                    <div style={{ ...styles.viewOnceIconBadge, backgroundColor: (hasAlreadyOpened || isMe) ? '#94a3b8' : '#ef4444' }}>
-                                      <Flame size={16} color="#ffffff" />
-                                    </div>
-                                    <div>
-                                      <div style={{ fontWeight: '700', fontSize: '13.5px', color: '#111b21' }}>
-                                        {isMe ? 'Photo (View Once Sent)' : hasAlreadyOpened ? 'Photo Expired' : 'Photo (View Once)'}
-                                      </div>
-                                      <div style={{ fontSize: '11.5px', color: '#667781' }}>
-                                        {isMe ? 'Cannot be opened' : hasAlreadyOpened ? 'Expired' : 'Tap to open'}
-                                      </div>
-                                    </div>
-                                  </div>
-                                </div>
-                              ) : isImage ? (
-                                <img
-                                  src={mediaUrl}
-                                  alt="Shared"
-                                  onClick={() => setPreviewImage({ src: mediaUrl, title: 'Shared Photo' })}
-                                  style={{ maxWidth: '100%', maxHeight: '280px', borderRadius: '8px', display: 'block', cursor: 'pointer' }}
-                                />
-                              ) : isAudio ? (
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '4px 0', minWidth: '200px' }}>
-                                  <audio controls src={mediaUrl} style={{ height: '32px', width: '160px' }} />
-                                  <div style={{ display: 'flex', gap: '3px', alignItems: 'flex-end', height: '24px' }}>
-                                    <div className="wave-bar" style={{ animationDuration: '0.8s' }}></div>
-                                    <div className="wave-bar" style={{ animationDuration: '1.1s' }}></div>
-                                    <div className="wave-bar" style={{ animationDuration: '0.6s' }}></div>
-                                    <div className="wave-bar" style={{ animationDuration: '0.9s' }}></div>
-                                  </div>
-                                </div>
-                              ) : isPoll ? (
-                                (() => {
-                                  try {
-                                    const pollObj = JSON.parse(m.content.replace('[POLL]:', ''));
-                                    const votes = pollObj.votes || {};
-                                    const totalVotes = Object.values(votes).reduce((acc, vArr) => acc + vArr.length, 0);
-                                    const userVotedIndex = Object.keys(votes).find((idx) => votes[idx]?.includes(profile.id));
-
-                                    return (
-                                      <div style={{ padding: '4px 0' }}>
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: '800', fontSize: '14.5px', color: '#111b21', marginBottom: '8px' }}>
-                                          <BarChart2 size={16} color="#00a884" />
-                                          <span>{pollObj.question}</span>
-                                        </div>
-                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                                          {pollObj.options.map((opt, oIdx) => {
-                                            const optVoters = votes[oIdx] || [];
-                                            const count = optVoters.length;
-                                            const pct = totalVotes > 0 ? Math.round((count / totalVotes) * 100) : 0;
-                                            const isChosen = userVotedIndex !== undefined && Number(userVotedIndex) === oIdx;
-
-                                            return (
-                                              <div
-                                                key={oIdx}
-                                                onClick={() => {
-                                                  if (userVotedIndex === undefined) handleVotePoll(m.id, oIdx);
-                                                }}
-                                                style={{
-                                                  ...styles.pollOptionBox,
-                                                  borderColor: isChosen ? '#00a884' : '#cbd5e1',
-                                                  backgroundColor: isChosen ? '#f0fdf4' : '#ffffff',
-                                                  cursor: userVotedIndex === undefined ? 'pointer' : 'default'
-                                                }}
-                                              >
-                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13.5px', fontWeight: '600', color: '#111b21', zIndex: 2, position: 'relative' }}>
-                                                  <span>{opt} {isChosen && '✓'}</span>
-                                                  <span style={{ fontSize: '12px', color: '#667781' }}>{count} vote{count !== 1 ? 's' : ''} ({pct}%)</span>
-                                                </div>
-                                                <div style={{ ...styles.pollProgressBar, width: `${pct}%`, backgroundColor: isChosen ? '#dcfce7' : '#f1f5f9' }} />
-                                              </div>
-                                            );
-                                          })}
-                                        </div>
-                                        <div style={{ fontSize: '11px', color: '#667781', marginTop: '6px', textAlign: 'right' }}>
-                                          {totalVotes} total vote{totalVotes !== 1 ? 's' : ''}
-                                        </div>
-                                      </div>
-                                    );
-                                  } catch {
-                                    return <div>[Invalid Poll]</div>;
-                                  }
-                                })()
-                              ) : youtubeId ? (
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                                  <div 
-                                    onClick={() => window.open(`https://www.youtube.com/watch?v=${youtubeId}`, '_blank')}
-                                    style={styles.youtubeCardWrapper}
-                                  >
-                                    <div style={{ position: 'relative', width: '100%', height: '140px', backgroundColor: '#000000' }}>
-                                      <img
-                                        src={`https://img.youtube.com/vi/${youtubeId}/hqdefault.jpg`}
-                                        alt="YouTube Thumbnail"
-                                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                                      />
-                                      <div style={styles.youtubePlayOverlay}>
-                                        <Play size={24} color="#ffffff" fill="#ffffff" />
-                                      </div>
-                                    </div>
-                                    <div style={{ padding: '8px 10px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                                      <span style={{ fontSize: '13px', fontWeight: '700', color: '#111b21', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                        YouTube Video • Watch on YouTube
-                                      </span>
-                                      <ExternalLink size={14} color="#54656f" />
-                                    </div>
-                                  </div>
-                                  <div style={{ fontSize: '14px', wordBreak: 'break-word' }}>{renderMessageTextWithLinks(m.content)}</div>
-                                </div>
-                              ) : (
-                                <div style={{ fontSize: '14.2px', lineHeight: '19px', wordBreak: 'break-word' }}>
-                                  {renderMessageTextWithLinks(m.content)}
-                                </div>
-                              )}
-
-                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '3px', marginTop: '2px' }}>
-                                {m.edited_at && (
-                                  <span style={{ fontSize: '9px', fontStyle: 'italic', color: '#667781' }}>edited</span>
-                                )}
-                                <span style={{ fontSize: '10.5px', color: '#667781' }}>{time}</span>
-                                {isMe && renderSeenReceipt(m)}
-                              </div>
-                            </div>
-
-                            {/* WhatsApp Quick Emoji Hover Bar */}
-                            <div style={{
-                              ...styles.quickHoverBar,
-                              opacity: showQuickEmoji ? 1 : 0,
-                              pointerEvents: showQuickEmoji ? 'auto' : 'none',
-                              transform: showQuickEmoji ? 'scale(1)' : 'scale(0.92)',
-                              transition: 'opacity 0.08s ease, transform 0.08s ease',
-                              marginInline: '6px'
-                            }}>
-                              <button 
-                                data-floating-ui="reaction-picker-trigger"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  const isOpeningSameMessage = activeReactionPickerMsgId === m.id;
-                                  setActiveReactionPickerMsgId(isOpeningSameMessage ? null : m.id);
-                                  // Always reset the extended grid when the picker's target message
-                                  // changes — otherwise it can stay stuck open from whichever
-                                  // message it was last opened on, showing the wrong content.
-                                  setShowExtendedReactions(false);
-                                }} 
-                                style={styles.quickIconBtn} 
-                                title="React">
-                                <Smile size={14} />
-                              </button>
-                            </div>
-
-                            {/* WhatsApp Vertical Dropdown Menu */}
-                            {isMenuOpen && (
-                              <div
-                                data-floating-ui="message-options-menu"
-                                style={{
-                                  ...styles.whatsappDropdownMenu,
-                                  [isMe ? 'left' : 'right']: '-140px',
-                                  ...(messageMenuFlipUp
-                                    ? { top: 'auto', bottom: '28px' }
-                                    : { top: '28px', bottom: 'auto' }),
-                                }}
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                <button
-                                  onClick={() => { setReplyingTo(m); setEditingMessage(null); setOpenMessageMenuId(null); }}
-                                  style={styles.whatsappDropItem}
-                                >
-                                  <CornerUpLeft size={14} /> Reply
-                                </button>
-                                <button
-                                  onClick={() => { setForwardingMessage(m); setShowForwardModal(true); setOpenMessageMenuId(null); }}
-                                  style={styles.whatsappDropItem}
-                                >
-                                  <Share2 size={14} /> Forward
-                                </button>
-                                {isMe && !isImage && !isViewOnceImg && !isAudio && !isPoll && (
-                                  <button
-                                    onClick={() => { setEditingMessage(m); setNewMessage(m.content); setReplyingTo(null); setOpenMessageMenuId(null); }}
-                                    style={styles.whatsappDropItem}
-                                  >
-                                    <Edit2 size={14} /> Edit
-                                  </button>
-                                )}
-                                <button
-                                  onClick={() => { setSelectedMessageIds([m.id]); setOpenMessageMenuId(null); }}
-                                  style={{ ...styles.whatsappDropItem, color: '#dc2626' }}
-                                >
-                                  <Trash2 size={14} /> Delete
-                                </button>
-                              </div>
+                           
+                          <div style={styles.messageBubbleWrapper}>
+                            {activeConversation.is_group && !isMe && (
+                              <div style={styles.bubbleSenderName}>{getDisplayName(m.profiles) || 'Account deleted'}</div>
                             )}
 
-                            {activeReactionPickerMsgId === m.id && (
-                              <div 
-                                data-floating-ui="reaction-picker-popup"
-                                style={{ ...styles.whatsappReactionPopup, [isMe ? 'right' : 'left']: 0 }}
+                            <div style={{ display: 'flex', alignItems: 'center', position: 'relative', flexDirection: isMe ? 'row-reverse' : 'row' }}>
+                               
+                              <div
+                                style={{
+                                  ...styles.bubble,
+                                  backgroundColor: isMe ? '#d9fdd3' : '#ffffff',
+                                  color: '#111b21',
+                                  borderBottomRightRadius: isMe ? '2px' : '8px',
+                                  borderBottomLeftRadius: isMe ? '8px' : '2px',
+                                  padding: (isImage || isViewOnceImg) ? '4px' : '8px 28px 6px 12px',
+                                  minWidth: isPoll ? '260px' : youtubeId ? '240px' : 'auto',
+                                }}
                               >
-                                <div style={styles.whatsappReactionInner}>
-                                  {quickEmojis.map((emoji) => (
-                                    <button 
-                                      key={emoji} 
-                                      onClick={() => handleSelectReaction(m.id, emoji)}
-                                      style={styles.reactionEmojiBtn}>
-                                      {emoji}
-                                    </button>
-                                  ))}
-
-                                  <button 
-                                    onClick={() => setShowExtendedReactions(!showExtendedReactions)} 
-                                    style={styles.reactionEmojiBtn} 
-                                    title="More emojis">
-                                    <Plus size={14} color="#64748b" />
+                                {isHovered && (
+                                  <button
+                                    data-floating-ui="message-chevron-trigger"
+                                    className="chevron-hover-btn"
+                                    onClick={(e) => handleToggleMessageMenu(e, m.id)}
+                                    style={styles.messageChevronBtn}
+                                    title="Message Options"
+                                  >
+                                    <ChevronDown size={15} color="currentColor" className="chevron-hover-icon" />
                                   </button>
-                                </div>
+                                )}
 
-                                {showExtendedReactions && (
-                                  <div style={styles.extendedReactionGrid}>
-                                    {EMOJI_PALETTE.map((customEmoji) => (
-                                      <span 
-                                        key={customEmoji} 
-                                        onClick={() => handleSelectReaction(m.id, customEmoji)}
-                                        className="hover-dim" style={styles.gridEmojiSpan}>
-                                        {customEmoji}
-                                      </span>
-                                    ))}
+                                {repliedMsg && (
+                                  <div style={{
+                                    ...styles.replyQuoteBox,
+                                    borderLeftColor: isMe ? '#00a884' : '#128c7e',
+                                    backgroundColor: isMe ? 'rgba(0,168,132,0.1)' : '#f0f2f5'
+                                  }}>
+                                    <div style={{ fontSize: '11px', fontWeight: '700', color: isMe ? '#00a884' : '#128c7e' }}>
+                                      {getDisplayName(repliedMsg.profiles) || 'User'}
+                                    </div>
+                                    <div style={{ fontSize: '11px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', opacity: 0.85 }}>
+                                      {getMessagePreviewLabel(repliedMsg.content)}
+                                    </div>
                                   </div>
                                 )}
+
+                                {isViewOnceImg ? (
+                                  <div 
+                                    onClick={() => handleOpenViewOnce(m)}
+                                    style={{
+                                      ...styles.viewOnceBubbleCard,
+                                      opacity: (hasAlreadyOpened || isMe) ? 0.6 : 1,
+                                      cursor: isMe ? 'default' : 'pointer'
+                                    }}
+                                    title={isMe ? "You sent this view-once photo" : "Tap to open"}
+                                  >
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                      <div style={{ ...styles.viewOnceIconBadge, backgroundColor: (hasAlreadyOpened || isMe) ? '#94a3b8' : '#ef4444' }}>
+                                        <Flame size={16} color="#ffffff" />
+                                      </div>
+                                      <div>
+                                        <div style={{ fontWeight: '700', fontSize: '13.5px', color: '#111b21' }}>
+                                          {isMe ? 'Photo (View Once Sent)' : hasAlreadyOpened ? 'Photo Expired' : 'Photo (View Once)'}
+                                        </div>
+                                        <div style={{ fontSize: '11.5px', color: '#667781' }}>
+                                          {isMe ? 'Cannot be opened' : hasAlreadyOpened ? 'Expired' : 'Tap to open'}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                ) : isImage ? (
+                                  <img
+                                    src={mediaUrl}
+                                    alt="Shared"
+                                    onClick={() => setPreviewImage({ src: mediaUrl, title: 'Shared Photo' })}
+                                    style={{ maxWidth: '100%', maxHeight: '280px', borderRadius: '8px', display: 'block', cursor: 'pointer' }}
+                                  />
+                                ) : isAudio ? (
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '4px 0', minWidth: '200px' }}>
+                                    <audio controls src={mediaUrl} style={{ height: '32px', width: '160px' }} />
+                                    <div style={{ display: 'flex', gap: '3px', alignItems: 'flex-end', height: '24px' }}>
+                                      <div className="wave-bar" style={{ animationDuration: '0.8s' }}></div>
+                                      <div className="wave-bar" style={{ animationDuration: '1.1s' }}></div>
+                                      <div className="wave-bar" style={{ animationDuration: '0.6s' }}></div>
+                                      <div className="wave-bar" style={{ animationDuration: '0.9s' }}></div>
+                                    </div>
+                                  </div>
+                                ) : isPoll ? (
+                                  (() => {
+                                    try {
+                                      const pollObj = JSON.parse(m.content.replace('[POLL]:', ''));
+                                      const votes = pollObj.votes || {};
+                                      const totalVotes = Object.values(votes).reduce((acc, vArr) => acc + vArr.length, 0);
+                                      const userVotedIndex = Object.keys(votes).find((idx) => votes[idx]?.includes(profile.id));
+
+                                      return (
+                                        <div style={{ padding: '4px 0' }}>
+                                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: '800', fontSize: '14.5px', color: '#111b21', marginBottom: '8px' }}>
+                                            <BarChart2 size={16} color="#00a884" />
+                                            <span>{pollObj.question}</span>
+                                          </div>
+                                          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                            {pollObj.options.map((opt, oIdx) => {
+                                              const optVoters = votes[oIdx] || [];
+                                              const count = optVoters.length;
+                                              const pct = totalVotes > 0 ? Math.round((count / totalVotes) * 100) : 0;
+                                              const isChosen = userVotedIndex !== undefined && Number(userVotedIndex) === oIdx;
+
+                                              return (
+                                                <div
+                                                  key={oIdx}
+                                                  onClick={() => {
+                                                    if (userVotedIndex === undefined) handleVotePoll(m.id, oIdx);
+                                                  }}
+                                                  style={{
+                                                    ...styles.pollOptionBox,
+                                                    borderColor: isChosen ? '#00a884' : '#cbd5e1',
+                                                    backgroundColor: isChosen ? '#f0fdf4' : '#ffffff',
+                                                    cursor: userVotedIndex === undefined ? 'pointer' : 'default'
+                                                  }}
+                                                >
+                                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13.5px', fontWeight: '600', color: '#111b21', zIndex: 2, position: 'relative' }}>
+                                                    <span>{opt} {isChosen && '✓'}</span>
+                                                    <span style={{ fontSize: '12px', color: '#667781' }}>{count} vote{count !== 1 ? 's' : ''} ({pct}%)</span>
+                                                  </div>
+                                                  <div style={{ ...styles.pollProgressBar, width: `${pct}%`, backgroundColor: isChosen ? '#dcfce7' : '#f1f5f9' }} />
+                                                </div>
+                                              );
+                                            })}
+                                          </div>
+                                          <div style={{ fontSize: '11px', color: '#667781', marginTop: '6px', textAlign: 'right' }}>
+                                            {totalVotes} total vote{totalVotes !== 1 ? 's' : ''}
+                                          </div>
+                                        </div>
+                                      );
+                                    } catch {
+                                      return <div>[Invalid Poll]</div>;
+                                    }
+                                  })()
+                                ) : youtubeId ? (
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                    <div 
+                                      onClick={() => window.open(`https://www.youtube.com/watch?v=${youtubeId}`, '_blank')}
+                                      style={styles.youtubeCardWrapper}
+                                    >
+                                      <div style={{ position: 'relative', width: '100%', height: '140px', backgroundColor: '#000000' }}>
+                                        <img
+                                          src={`https://img.youtube.com/vi/${youtubeId}/hqdefault.jpg`}
+                                          alt="YouTube Thumbnail"
+                                          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                        />
+                                        <div style={styles.youtubePlayOverlay}>
+                                          <Play size={24} color="#ffffff" fill="#ffffff" />
+                                        </div>
+                                      </div>
+                                      <div style={{ padding: '8px 10px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                        <span style={{ fontSize: '13px', fontWeight: '700', color: '#111b21', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                          YouTube Video • Watch on YouTube
+                                        </span>
+                                        <ExternalLink size={14} color="#54656f" />
+                                      </div>
+                                    </div>
+                                    <div style={{ fontSize: '14px', wordBreak: 'break-word' }}>{renderMessageTextWithLinks(m.content)}</div>
+                                  </div>
+                                ) : (
+                                  <div style={{ fontSize: '14.2px', lineHeight: '19px', wordBreak: 'break-word' }}>
+                                    {renderMessageTextWithLinks(m.content)}
+                                  </div>
+                                )}
+
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '3px', marginTop: '2px' }}>
+                                  {m.edited_at && (
+                                    <span style={{ fontSize: '9px', fontStyle: 'italic', color: '#667781' }}>edited</span>
+                                  )}
+                                  <span style={{ fontSize: '10.5px', color: '#667781' }}>{time}</span>
+                                  {isMe && renderSeenReceipt(m)}
+                                </div>
+                              </div>
+
+                              {/* WhatsApp Quick Emoji Hover Bar */}
+                              <div style={{
+                                ...styles.quickHoverBar,
+                                opacity: showQuickEmoji ? 1 : 0,
+                                pointerEvents: showQuickEmoji ? 'auto' : 'none',
+                                transform: showQuickEmoji ? 'scale(1)' : 'scale(0.92)',
+                                transition: 'opacity 0.08s ease, transform 0.08s ease',
+                                marginInline: '6px'
+                              }}>
+                                <button 
+                                  data-floating-ui="reaction-picker-trigger"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    const isOpeningSameMessage = activeReactionPickerMsgId === m.id;
+                                    setActiveReactionPickerMsgId(isOpeningSameMessage ? null : m.id);
+                                    setShowExtendedReactions(false);
+                                  }} 
+                                  style={styles.quickIconBtn} 
+                                  title="React">
+                                  <Smile size={14} />
+                                </button>
+                              </div>
+
+                              {/* WhatsApp Vertical Dropdown Menu */}
+                              {isMenuOpen && (
+                                <div
+                                  data-floating-ui="message-options-menu"
+                                  style={{
+                                    ...styles.whatsappDropdownMenu,
+                                    [isMe ? 'left' : 'right']: '-140px',
+                                    ...(messageMenuFlipUp
+                                      ? { top: 'auto', bottom: '28px' }
+                                      : { top: '28px', bottom: 'auto' }),
+                                  }}
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  <button
+                                    onClick={() => { setReplyingTo(m); setEditingMessage(null); setOpenMessageMenuId(null); }}
+                                    style={styles.whatsappDropItem}
+                                  >
+                                    <CornerUpLeft size={14} /> Reply
+                                  </button>
+                                  <button
+                                    onClick={() => { setForwardingMessage(m); setShowForwardModal(true); setOpenMessageMenuId(null); }}
+                                    style={styles.whatsappDropItem}
+                                  >
+                                    <Share2 size={14} /> Forward
+                                  </button>
+                                  {isMe && !isImage && !isViewOnceImg && !isAudio && !isPoll && (
+                                    <button
+                                      onClick={() => { setEditingMessage(m); setNewMessage(m.content); setReplyingTo(null); setOpenMessageMenuId(null); }}
+                                      style={styles.whatsappDropItem}
+                                    >
+                                      <Edit2 size={14} /> Edit
+                                    </button>
+                                  )}
+                                  <button
+                                    onClick={() => { setSelectedMessageIds([m.id]); setOpenMessageMenuId(null); }}
+                                    style={{ ...styles.whatsappDropItem, color: '#dc2626' }}
+                                  >
+                                    <Trash2 size={14} /> Delete
+                                  </button>
+                                </div>
+                              )}
+
+                              {activeReactionPickerMsgId === m.id && (
+                                <div 
+                                  data-floating-ui="reaction-picker-popup"
+                                  style={{ ...styles.whatsappReactionPopup, [isMe ? 'right' : 'left']: 0 }}
+                                >
+                                  <div style={styles.whatsappReactionInner}>
+                                    {quickEmojis.map((emoji) => (
+                                      <button 
+                                        key={emoji} 
+                                        onClick={() => handleSelectReaction(m.id, emoji)}
+                                        style={styles.reactionEmojiBtn}>
+                                        {emoji}
+                                      </button>
+                                    ))}
+
+                                    <button 
+                                      onClick={() => setShowExtendedReactions(!showExtendedReactions)} 
+                                      style={styles.reactionEmojiBtn} 
+                                      title="More emojis">
+                                      <Plus size={14} color="#64748b" />
+                                    </button>
+                                  </div>
+
+                                  {showExtendedReactions && (
+                                    <div style={styles.extendedReactionGrid}>
+                                      {EMOJI_PALETTE.map((customEmoji) => (
+                                        <span 
+                                          key={customEmoji} 
+                                          onClick={() => handleSelectReaction(m.id, customEmoji)}
+                                          className="hover-dim" style={styles.gridEmojiSpan}>
+                                          {customEmoji}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+
+                            {msgReactions.length > 0 && (
+                              <div style={{ ...styles.reactionBadgeRow, justifyContent: isMe ? 'flex-end' : 'flex-start' }}>
+                                {Array.from(new Set(msgReactions.map((r) => r.emoji))).map((em) => {
+                                  const count = msgReactions.filter((r) => r.emoji === em).length;
+                                  const hasReacted = msgReactions.some((r) => r.emoji === em && r.user_id === profile.id);
+                                  return (
+                                    <span 
+                                      key={em} 
+                                      className="hover-dim"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setReactionDetailsTarget({
+                                          messageId: m.id,
+                                          emoji: em,
+                                          reactors: msgReactions.filter(r => r.emoji === em)
+                                        });
+                                      }}
+                                      style={{
+                                        ...styles.reactionPill,
+                                        borderColor: hasReacted ? '#00a884' : '#e9edef',
+                                        backgroundColor: hasReacted ? '#d9fdd3' : '#ffffff'
+                                      }}
+                                      title="Click to see who reacted"
+                                    >
+                                      {em} {count > 1 ? count : ''}
+                                    </span>
+                                  );
+                                })}
                               </div>
                             )}
                           </div>
-
-                          {msgReactions.length > 0 && (
-                            <div style={{ ...styles.reactionBadgeRow, justifyContent: isMe ? 'flex-end' : 'flex-start' }}>
-                              {Array.from(new Set(msgReactions.map((r) => r.emoji))).map((em) => {
-                                const count = msgReactions.filter((r) => r.emoji === em).length;
-                                const hasReacted = msgReactions.some((r) => r.emoji === em && r.user_id === profile.id);
-                                return (
-                                  <span 
-                                    key={em} 
-                                    className="hover-dim"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setReactionDetailsTarget({
-                                        messageId: m.id,
-                                        emoji: em,
-                                        reactors: msgReactions.filter(r => r.emoji === em)
-                                      });
-                                    }}
-                                    style={{
-                                      ...styles.reactionPill,
-                                      borderColor: hasReacted ? '#00a884' : '#e9edef',
-                                      backgroundColor: hasReacted ? '#d9fdd3' : '#ffffff'
-                                    }}
-                                    title="Click to see who reacted"
-                                  >
-                                    {em} {count > 1 ? count : ''}
-                                  </span>
-                                );
-                              })}
-                            </div>
-                          )}
                         </div>
-                      </div>
-                    </React.Fragment>
-                  );
-                })}
+                      </React.Fragment>
+                    );
+                  });
+                })()}
 
                 {isCurrentChatTyping && !isAccountDeleted && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: '6px 0 2px' }}>
