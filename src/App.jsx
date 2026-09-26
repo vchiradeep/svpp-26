@@ -2819,10 +2819,25 @@ export default function App() {
     ? activeConversation.conversation_members?.filter((m) => getUserStatusType(m.user_id) === 'online').length
     : 0;
 
+  // Automatically filter out hidden chats AND prevent duplicate direct chats
+  const seenDirectUsers = new Set();
   const visibleConversations = conversations.filter((c) => {
-    if (deletedChatIdsRef.current.has(c.id)) return false;
+    if (deletedChatIdsRef.current?.has?.(c.id)) return false;
+    
     const myMem = c.conversation_members?.find((m) => m.user_id === profile?.id);
-    return !myMem?.hidden_at && !archivedConvIds.includes(c.id);
+    if (myMem?.hidden_at) return false;
+
+    // For direct chats, ensure only ONE chat per peer user is displayed
+    if (!c.is_group) {
+      const otherMember = c.conversation_members?.find((m) => m.user_id !== profile?.id);
+      if (otherMember) {
+        if (seenDirectUsers.has(otherMember.user_id)) {
+          return false; // Hides any extra duplicate chat documents automatically
+        }
+        seenDirectUsers.add(otherMember.user_id);
+      }
+    }
+    return true;
   });
 
   const archivedConversations = conversations.filter((c) => {
