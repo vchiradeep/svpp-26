@@ -2567,7 +2567,12 @@ export default function App() {
     } else {
       const otherMem = activeConvMembers.find((m) => m.user_id !== profile.id);
       const otherStat = otherUserId ? getUserStatusType(otherUserId) : 'offline';
-      const isSeen = otherMem?.last_read_at && new Date(otherMem.last_read_at) >= new Date(msg.created_at);
+      
+      // Use parseSafeDate so Firestore timestamps compare correctly
+      const msgDate = parseSafeDate(msg.created_at);
+      const readDate = parseSafeDate(otherMem?.last_read_at);
+      
+      const isSeen = otherMem?.last_read_at && readDate >= msgDate;
       const isDelivered = otherStat === 'online' || isSeen;
 
       if (isSeen) {
@@ -2586,7 +2591,7 @@ export default function App() {
         );
       } else {
         return (
-          <span style={{ ...styles.statusMeta, color: '#8696a0' }} title="Sent">
+          <span style={styles.statusMeta} title="Sent">
             <Check size={15} color="#8696a0" />
             <span style={{ color: '#8696a0', fontSize: '11px', marginLeft: '2px' }}>Sent</span>
           </span>
