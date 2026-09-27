@@ -143,7 +143,11 @@ const uploadMediaToFirebaseStorage = async (file, conversationId) => {
 
 const extractYouTubeId = (text) => {
   if (!text) return null;
-  const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/;
+  // Added `shorts\/` alongside the existing patterns (watch?v=, youtu.be/,
+  // embed/, etc.) — Shorts URLs look like
+  // youtube.com/shorts/VIDEO_ID and didn't match any existing branch before,
+  // so they never got a thumbnail.
+  const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|shorts\/|watch\?v=|&v=)([^#&?]*).*/;
   const match = text.match(regExp);
   return (match && match[2].length === 11) ? match[2] : null;
 };
@@ -1067,7 +1071,16 @@ export default function App() {
         }
       });
 
-      const toMillis = (ts) => (ts?.toMillis ? ts.toMillis() : 0);
+      // A message you JUST sent has last_message_at as a pending
+      // serverTimestamp() — it reads back as null in THIS client's own local
+      // snapshot for the brief moment before the server assigns the real
+      // value and syncs it back down. Treating that null as epoch-0 (as
+      // before) sorted the conversation to the very bottom for that instant,
+      // then it jumped back to the top a moment later — the "goes down then
+      // comes back up" glitch. A null timestamp here can only mean "a write
+      // I just made hasn't round-tripped yet", so treat it as now (most
+      // recent), which is where it belongs regardless.
+      const toMillis = (ts) => (ts ? (ts.toMillis ? ts.toMillis() : new Date(ts).getTime()) : Date.now());
       setConversations([...convList].sort((a, b) => toMillis(b.last_message_at) - toMillis(a.last_message_at)));
 
       const newUnread = {};
@@ -1182,9 +1195,12 @@ export default function App() {
 
     // last_message_at is a Firestore Timestamp (or a resolving server
     // sentinel briefly after creation) — .toMillis() handles the normal
-    // case, with a plain Date fallback for anything already coerced.
+    // case, with a plain Date fallback for anything already coerced. A null
+    // value can only mean a just-made write hasn't round-tripped yet, so
+    // treat it as now rather than epoch-0 (see the realtime version above
+    // for why that distinction matters).
     const toMillis = (ts) => {
-      if (!ts) return 0;
+      if (!ts) return Date.now();
       if (typeof ts.toMillis === 'function') return ts.toMillis();
       return new Date(ts).getTime();
     };
@@ -2011,7 +2027,11 @@ export default function App() {
       setPendingImageUpload({ src: publicUrl });
       setIsViewOnceChecked(false);
     } catch (err) {
-      alert('Failed to upload image: ' + (err?.message || 'Unknown error. Please check your connection and try again.'));
+      // err.code (e.g. storage/unauthorized, storage/unknown) pinpoints
+      // whether this is a Storage security-rules issue or something else —
+      // err.message alone from Firebase Storage is often too generic to
+      // diagnose from.
+      alert('Failed to upload image' + (err?.code ? ` (${err.code})` : '') + ': ' + (err?.message || 'Unknown error. Please check your connection and try again.'));
     }
     e.target.value = null;
   };
@@ -2182,7 +2202,7 @@ export default function App() {
           setReplyingTo(null);
           setTimeout(() => scrollToBottom('smooth'), 50);
         } catch (err) {
-          alert('Failed to send voice note: ' + (err?.message || 'Unknown error. Please check your connection and try again.'));
+          alert('Failed to send voice note' + (err?.code ? ` (${err.code})` : '') + ': ' + (err?.message || 'Unknown error. Please check your connection and try again.'));
         } finally {
           stream.getTracks().forEach((track) => track.stop());
         }
@@ -3016,25 +3036,26 @@ export default function App() {
                     const chatUnread = unreadCounts[c.id] || 0;
                     const isTypingNow = convTypingMap[c.id];
 
-                    const visibleMessagesForRow = (c.messages || []).filter((m) => {
-                      if (!m) return false;
-                      if (m.is_deleted_for_everyone) return false;
-                      if (Array.isArray(m.deleted_for) && m.deleted_for.includes(profile?.id)) return false;
-                      return true;
-                    });
-                    const latestMsg = visibleMessagesForRow.length > 0
-                      ? visibleMessagesForRow.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0]
+                    // Firestore conversation docs carry the last message
+                    // denormalized directly (last_message /
+                    // last_message_at / last_message_sender_id) — there is
+                    // no embedded c.messages array the way a Postgrest
+                    // nested-select used to provide. Scanning c.messages
+                    // here (as before) always found nothing, which is why
+                    // every row silently fell back to the generic
+                    // "Say hi / No messages yet" placeholder instead of
+                    // showing the real last message.
+                    const chatTimestamp = formatChatTimestamp(c.last_message_at || c.created_at);
+
+                    const latestMsgSenderProfile = c.last_message_sender_id
+                      ? (c.memberProfiles?.[c.last_message_sender_id] ||
+                         c.conversation_members?.find((m) => m.user_id === c.last_message_sender_id)?.profiles)
                       : null;
-                    const chatTimestamp = formatChatTimestamp(latestMsg?.created_at || c.created_at);
-                     
-                    const latestMsgSenderProfile = latestMsg
-                      ? c.conversation_members?.find((m) => m.user_id === latestMsg.sender_id)?.profiles
+                    const latestMsgSenderLabel = c.last_message
+                      ? (c.last_message_sender_id === profile?.id ? 'You' : (c.is_group ? (getDisplayName(latestMsgSenderProfile) || 'Member') : null))
                       : null;
-                    const latestMsgSenderLabel = latestMsg
-                      ? (latestMsg.sender_id === profile?.id ? 'You' : (c.is_group ? (getDisplayName(latestMsgSenderProfile) || 'Member') : null))
-                      : null;
-                    const latestMsgPreviewText = latestMsg
-                      ? `${latestMsgSenderLabel ? latestMsgSenderLabel + ': ' : ''}${getMessagePreviewLabel(latestMsg.content)}`
+                    const latestMsgPreviewText = c.last_message
+                      ? `${latestMsgSenderLabel ? latestMsgSenderLabel + ': ' : ''}${getMessagePreviewLabel(c.last_message)}`
                       : (c.is_group ? 'No messages yet' : 'Say hi 👋 to start chatting');
 
                     const subLabel = isTypingNow && !rowIsDeleted 
