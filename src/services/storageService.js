@@ -1,11 +1,25 @@
-import { storage } from '../firebaseClient';
-import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
-
-// Helper function to compress images on the client side before upload
+// Helper function to compress images on the client side
 const compressImage = async (file, maxWidth = 1200, quality = 0.8) => {
-  // If it's not an image, return the original file untouched
-  if (!file || !file.type || !file.type.startsWith('image/')) {
-    return file;
+  if (!file) return '';
+
+  // If it's an audio file (voice notes), convert directly to data URL
+  if (file.type && file.type.startsWith('audio/')) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (event) => resolve(event.target.result);
+      reader.onerror = (error) => reject(error);
+      reader.readAsDataURL(file);
+    });
+  }
+
+  // If it's not an image, return original file as data URL
+  if (!file.type || !file.type.startsWith('image/')) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (event) => resolve(event.target.result);
+      reader.onerror = (error) => reject(error);
+      reader.readAsDataURL(file);
+    });
   }
 
   return new Promise((resolve) => {
@@ -31,69 +45,42 @@ const compressImage = async (file, maxWidth = 1200, quality = 0.8) => {
         const ctx = canvas.getContext('2d');
         ctx.drawImage(img, 0, 0, width, height);
 
-        // Convert canvas to a compressed WebP blob
-        canvas.toBlob(
-          (blob) => {
-            if (!blob) {
-              resolve(file); // Fallback to original if compression fails
-              return;
-            }
-            const compressedFile = new File(
-              [blob],
-              file.name.replace(/\.[^/.]+$/, '') + '.webp',
-              {
-                type: 'image/webp',
-                lastModified: Date.now(),
-              }
-            );
-            resolve(compressedFile);
-          },
-          'image/webp',
-          quality
-        );
+        // Convert canvas to a compressed WebP Data URL string
+        const dataUrl = canvas.toDataURL('image/webp', quality);
+        resolve(dataUrl);
       };
-      img.onerror = () => resolve(file); // Fallback on error
+      img.onerror = () => {
+        const fallbackReader = new FileReader();
+        fallbackReader.onload = (e) => resolve(e.target.result);
+        fallbackReader.readAsDataURL(file);
+      };
     };
-    reader.onerror = () => resolve(file); // Fallback on error
+    reader.onerror = () => {
+      const fallbackReader = new FileReader();
+      fallbackReader.onload = (e) => resolve(e.target.result);
+      fallbackReader.readAsDataURL(file);
+    };
   });
 };
 
 export const uploadAvatar = async (userId, file) => {
-  const processedFile = await compressImage(file);
-  const avatarRef = ref(storage, `avatars/${userId}/${Date.now()}_${processedFile.name}`);
-  await uploadBytes(avatarRef, processedFile);
-  return getDownloadURL(avatarRef);
+  return await compressImage(file, 400, 0.8);
 };
 
 export const uploadGroupAvatar = async (conversationId, file) => {
-  const processedFile = await compressImage(file);
-  const groupAvatarRef = ref(storage, `group_avatars/${conversationId}/${Date.now()}_${processedFile.name}`);
-  await uploadBytes(groupAvatarRef, processedFile);
-  return getDownloadURL(groupAvatarRef);
+  return await compressImage(file, 400, 0.8);
 };
 
 export const uploadWallpaper = async (userId, file) => {
-  const processedFile = await compressImage(file);
-  const wallpaperRef = ref(storage, `wallpapers/${userId}/${Date.now()}_${processedFile.name}`);
-  await uploadBytes(wallpaperRef, processedFile);
-  return getDownloadURL(wallpaperRef);
+  return await compressImage(file, 1200, 0.8);
 };
 
 export const uploadConversationMedia = async (conversationId, file) => {
-  const processedFile = await compressImage(file);
-  const mediaRef = ref(storage, `media/${conversationId}/${Date.now()}_${processedFile.name}`);
-  await uploadBytes(mediaRef, processedFile);
-  return getDownloadURL(mediaRef);
+  return await compressImage(file, 1000, 0.75);
 };
 
-// Best-effort cleanup — e.g. when a message with an attachment is deleted
-// for everyone. Failing silently is intentional: a missing storage object
-// should never block the message-delete flow.
+// Best-effort cleanup — kept as a safe no-op since local data URLs 
+// live directly inside Firestore documents and require no remote bucket deletion.
 export const deleteMediaByUrl = async (fileUrl) => {
-  try {
-    const fileRef = ref(storage, fileUrl);
-    await deleteObject(fileRef);
-  } catch (error) {
-    console.warn('Could not delete storage object (non-fatal):', error);
-  }
+  return Promise.resolve();
 };
