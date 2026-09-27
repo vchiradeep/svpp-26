@@ -21,6 +21,6 @@ jobs:
         run: npm install -g firebase-tools
 
       - name: Delete All Messages
-        run: firebase firestore:delete messages --recursive --project chat-app-live --force
+        run: firebase firestore:delete messages --recursive --project chat-app-live-eac4c --force
         env:
           FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
