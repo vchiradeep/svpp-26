@@ -348,10 +348,13 @@ export const updateMessage = async (conversationId, messageId, updates) => {
   await updateDoc(doc(db, 'conversations', conversationId, 'messages', messageId), updates);
 };
 
+// Permanently deletes the message from Firestore (frees up storage & removes for everyone)
 export const deleteMessageForEveryone = async (conversationId, messageId) => {
-  await updateMessage(conversationId, messageId, { is_deleted_for_everyone: true });
+  const messageRef = doc(db, 'conversations', conversationId, 'messages', messageId);
+  await deleteDoc(messageRef);
 };
 
+// Hides the message only for the user who clicked "Delete for Me" (preserves data for the other user)
 export const deleteMessageForMe = async (conversationId, messageId, userId) => {
   await updateMessage(conversationId, messageId, { deleted_for: arrayUnion(userId) });
 };
