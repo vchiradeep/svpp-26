@@ -2,9 +2,8 @@ name: Scheduled Firestore Cleanup
 
 on:
   schedule:
-    # Runs automatically every 15 days at midnight (UTC)
     - cron: '0 0 */15 * *'
-  workflow_dispatch: # Allows you to run it manually anytime from GitHub
+  workflow_dispatch: # Allows manual trigger anytime from GitHub
 
 jobs:
   cleanup:
@@ -22,6 +21,6 @@ jobs:
         run: npm install -g firebase-tools
 
       - name: Delete All Messages
-        run: firebase firestore:delete messages --recursive --project chat-app-live
+        run: firebase firestore:delete messages --recursive --project chat-app-live --force
         env:
           FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
