@@ -46,6 +46,7 @@ import {
   acceptFriendRequest as acceptFriendRequestInFirestore,
   removeFriendship,
   fetchFriendshipDocs,
+  subscribeToFriendships,
   fetchIncomingRequests,
   subscribeToIncomingRequests,
 } from './services/userService';
@@ -899,6 +900,10 @@ export default function App() {
         setActiveConversation(null);
         setConversations([]);
         setMessages([]);
+        // Requirement: archive stays unlocked for the session but must
+        // re-lock on logout — otherwise the next person to sign in on this
+        // browser would inherit the previous user's unlocked archive.
+        setIsArchiveUnlocked(false);
       }
       setLoading(false);
     });
@@ -1094,9 +1099,16 @@ export default function App() {
     // table listener.
     const unsubscribeRequests = subscribeToIncomingRequests(profile.id, (data) => setRequests(data));
 
+    // Friendships stay live too (both directions) — this is the actual fix
+    // for "accepted request still shows as unfriend until refresh": without
+    // it, only the receiver's incoming-requests view updated in realtime,
+    // never the original sender's own friendships list.
+    const unsubscribeFriendships = subscribeToFriendships(profile.id, (data) => setFriendships(data));
+
     return () => {
       unsubscribeConversations();
       unsubscribeRequests();
+      unsubscribeFriendships();
     };
   }, [profile?.id, nicknames]);
 
@@ -2554,8 +2566,15 @@ export default function App() {
     }
 
     if (activeConversation.is_group) {
+      // last_read_at / msg.created_at are Firestore Timestamp objects, not
+      // ISO strings — new Date(firestoreTimestamp) produces an Invalid
+      // Date, and an Invalid Date comparison is always false. That silently
+      // broke the "seen" check here (while the direct-chat branch below
+      // already used parseSafeDate correctly), which is why group ticks
+      // got stuck on grey "Delivered" and never advanced to blue "Seen".
+      const msgDate = parseSafeDate(msg.created_at);
       const readers = activeConvMembers.filter(
-        (m) => m.user_id !== profile.id && m.last_read_at && new Date(m.last_read_at) >= new Date(msg.created_at)
+        (m) => m.user_id !== profile.id && m.last_read_at && parseSafeDate(m.last_read_at) >= msgDate
       );
       const deliveredMembers = activeConvMembers.filter(
         (m) => m.user_id !== profile.id && getUserStatusType(m.user_id) === 'online'
@@ -2848,6 +2867,7 @@ export default function App() {
   const seenDirectUsers = new Set();
   const visibleConversations = conversations.filter((c) => {
     if (deletedChatIdsRef.current?.has?.(c.id)) return false;
+    if (archivedConvIds.includes(c.id)) return false;
     
     const myMem = c.conversation_members?.find((m) => m.user_id === profile?.id);
     if (myMem?.hidden_at) return false;
@@ -3036,26 +3056,31 @@ export default function App() {
                     const chatUnread = unreadCounts[c.id] || 0;
                     const isTypingNow = convTypingMap[c.id];
 
-                    // Firestore conversation docs carry the last message
-                    // denormalized directly (last_message /
-                    // last_message_at / last_message_sender_id) — there is
-                    // no embedded c.messages array the way a Postgrest
-                    // nested-select used to provide. Scanning c.messages
-                    // here (as before) always found nothing, which is why
-                    // every row silently fell back to the generic
-                    // "Say hi / No messages yet" placeholder instead of
-                    // showing the real last message.
-                    const chatTimestamp = formatChatTimestamp(c.last_message_at || c.created_at);
+                    // A "delete for me" only hides a message from the
+                    // deleting user, so it stores their personal fallback
+                    // preview under last_message_overrides.{uid} rather than
+                    // touching the shared last_message fields everyone else
+                    // still reads. hasOwnProperty distinguishes "no override
+                    // recorded" from "override is null" (deleted-for-me back
+                    // to an empty history) — a plain ?. chain can't tell
+                    // those apart.
+                    const hasOverride = !!(c.last_message_overrides && Object.prototype.hasOwnProperty.call(c.last_message_overrides, profile?.id));
+                    const myOverride = hasOverride ? c.last_message_overrides[profile.id] : null;
+                    const effectiveLastMessage = hasOverride ? myOverride?.content : c.last_message;
+                    const effectiveLastMessageAt = hasOverride ? myOverride?.at : c.last_message_at;
+                    const effectiveLastMessageSenderId = hasOverride ? myOverride?.sender_id : c.last_message_sender_id;
 
-                    const latestMsgSenderProfile = c.last_message_sender_id
-                      ? (c.memberProfiles?.[c.last_message_sender_id] ||
-                         c.conversation_members?.find((m) => m.user_id === c.last_message_sender_id)?.profiles)
+                    const chatTimestamp = formatChatTimestamp(effectiveLastMessageAt || c.created_at);
+
+                    const latestMsgSenderProfile = effectiveLastMessageSenderId
+                      ? (c.memberProfiles?.[effectiveLastMessageSenderId] ||
+                         c.conversation_members?.find((m) => m.user_id === effectiveLastMessageSenderId)?.profiles)
                       : null;
-                    const latestMsgSenderLabel = c.last_message
-                      ? (c.last_message_sender_id === profile?.id ? 'You' : (c.is_group ? (getDisplayName(latestMsgSenderProfile) || 'Member') : null))
+                    const latestMsgSenderLabel = effectiveLastMessage
+                      ? (effectiveLastMessageSenderId === profile?.id ? 'You' : (c.is_group ? (getDisplayName(latestMsgSenderProfile) || 'Member') : null))
                       : null;
-                    const latestMsgPreviewText = c.last_message
-                      ? `${latestMsgSenderLabel ? latestMsgSenderLabel + ': ' : ''}${getMessagePreviewLabel(c.last_message)}`
+                    const latestMsgPreviewText = effectiveLastMessage
+                      ? `${latestMsgSenderLabel ? latestMsgSenderLabel + ': ' : ''}${getMessagePreviewLabel(effectiveLastMessage)}`
                       : (c.is_group ? 'No messages yet' : 'Say hi 👋 to start chatting');
 
                     const subLabel = isTypingNow && !rowIsDeleted 
@@ -4375,7 +4400,13 @@ export default function App() {
                 </p>
                 <div style={styles.modalScrollList}>
                   {archivedConversations.map((c) => {
-                    const otherMember = c.conversation_members?.find((m) => m.user_id !== profile?.id)?.profiles;
+                    const otherMemberRow = c.conversation_members?.find((m) => m.user_id !== profile?.id);
+                    // Prefer the live profile from allUsers (kept fresh via
+                    // fetchUsers) over the frozen memberProfiles snapshot on
+                    // the conversation doc — otherwise this modal could show
+                    // a different, outdated photo/name than everywhere else
+                    // in the app for the same person.
+                    const otherMember = allUsers.find((u) => u.id === otherMemberRow?.user_id) || otherMemberRow?.profiles;
                     const title = c.is_group ? c.name : getDisplayName(otherMember) || 'Account deleted';
                     return (
                       <div key={c.id} className="hover-dim" style={styles.modalFriendRow}>

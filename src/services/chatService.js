@@ -348,15 +348,53 @@ export const updateMessage = async (conversationId, messageId, updates) => {
   await updateDoc(doc(db, 'conversations', conversationId, 'messages', messageId), updates);
 };
 
-// Permanently deletes the message from Firestore (frees up storage & removes for everyone)
-export const deleteMessageForEveryone = async (conversationId, messageId) => {
-  const messageRef = doc(db, 'conversations', conversationId, 'messages', messageId);
-  await deleteDoc(messageRef);
+// Deleting a message previously never touched the conversation's
+// denormalized last_message/last_message_at fields, so the sidebar preview
+// kept showing the deleted message's content forever instead of falling
+// back to whatever the previous, still-visible message was. This recomputes
+// those fields from the most recent messages after any delete.
+//
+// forUserId is only passed for a "delete for me" action: that must NOT
+// change what OTHER members see as the conversation's last message (only
+// this user's own view changed), so their personal fallback is stored
+// separately under last_message_overrides.{uid} rather than overwriting the
+// shared last_message field everyone else reads.
+const recomputeConversationPreview = async (conversationId, forUserId = null) => {
+  const messagesRef = collection(db, 'conversations', conversationId, 'messages');
+  // The previous still-visible message is virtually always within the last
+  // handful — 50 is a generous safety margin without scanning full history.
+  const recentQuery = query(messagesRef, orderBy('created_at', 'desc'), limit(50));
+  const snapshot = await getDocs(recentQuery);
+  const recentMessages = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+
+  if (!forUserId) {
+    const visibleGlobally = recentMessages.find((m) => !m.is_deleted_for_everyone);
+    await updateDoc(doc(db, 'conversations', conversationId), {
+      last_message: visibleGlobally ? visibleGlobally.content : null,
+      last_message_at: visibleGlobally ? visibleGlobally.created_at : serverTimestamp(),
+      last_message_sender_id: visibleGlobally ? visibleGlobally.sender_id : null,
+    });
+    return;
+  }
+
+  const visibleForUser = recentMessages.find(
+    (m) => !m.is_deleted_for_everyone && !(m.deleted_for || []).includes(forUserId)
+  );
+  await updateDoc(doc(db, 'conversations', conversationId), {
+    [`last_message_overrides.${forUserId}`]: visibleForUser
+      ? { content: visibleForUser.content, at: visibleForUser.created_at, sender_id: visibleForUser.sender_id }
+      : null,
+  });
 };
 
-// Hides the message only for the user who clicked "Delete for Me" (preserves data for the other user)
+export const deleteMessageForEveryone = async (conversationId, messageId) => {
+  await updateMessage(conversationId, messageId, { is_deleted_for_everyone: true });
+  await recomputeConversationPreview(conversationId);
+};
+
 export const deleteMessageForMe = async (conversationId, messageId, userId) => {
   await updateMessage(conversationId, messageId, { deleted_for: arrayUnion(userId) });
+  await recomputeConversationPreview(conversationId, userId);
 };
 
 // -------------------- Reactions --------------------

@@ -116,6 +116,48 @@ export const fetchFriendshipDocs = async (myId) => {
   ];
 };
 
+// Realtime version of the above — merges two live listeners (I'm the
+// sender / I'm the receiver) into one combined callback. This is the fix
+// for a real bug: without this, a friend_requests doc changing from
+// 'pending' to 'accepted' only ever reached the RECEIVER's UI (via
+// subscribeToIncomingRequests, which only watches pending requests directed
+// at them) — the original SENDER's own `friendships` list never updated
+// live, so their chat kept showing "unfriend" and refused to let them chat
+// until a manual page refresh re-ran the one-time fetch above.
+export const subscribeToFriendships = (myId, callback) => {
+  let sentDocs = [];
+  let receivedDocs = [];
+  let sentReady = false;
+  let receivedReady = false;
+
+  const emit = () => {
+    // Wait for both listeners' first snapshot before emitting, so the very
+    // first callback already has the complete picture instead of a
+    // momentarily-incomplete one-sided list.
+    if (sentReady && receivedReady) callback([...sentDocs, ...receivedDocs]);
+  };
+
+  const sentQ = query(collection(db, 'friend_requests'), where('sender_id', '==', myId));
+  const receivedQ = query(collection(db, 'friend_requests'), where('receiver_id', '==', myId));
+
+  const unsubSent = onSnapshot(sentQ, (snap) => {
+    sentDocs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    sentReady = true;
+    emit();
+  }, (error) => console.error('Error in sent-friendships subscription:', error));
+
+  const unsubReceived = onSnapshot(receivedQ, (snap) => {
+    receivedDocs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    receivedReady = true;
+    emit();
+  }, (error) => console.error('Error in received-friendships subscription:', error));
+
+  return () => {
+    unsubSent();
+    unsubReceived();
+  };
+};
+
 // Incoming pending requests for this user, with the sender's profile
 // attached as `.sender` (the render tree expects this embedded, the way
 // Postgrest's nested select used to provide it).
