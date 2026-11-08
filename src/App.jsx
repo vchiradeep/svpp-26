@@ -2286,20 +2286,12 @@ export default function App() {
     setConversations((prev) => prev.filter((c) => c.id !== convId));
 
     try {
-      const targetConv = conversations.find((c) => c.id === convId);
-      if (!targetConv) return;
-
-      const now = new Date().toISOString();
-      const updatedMembers = (targetConv.conversation_members || []).map((m) =>
-        m.user_id === profile.id ? { ...m, hidden_at: now } : m
-      );
-
-      // 3. Save the hidden status to Firebase
-      await updateConversation(convId, { conversation_members: updatedMembers });
-    } catch (error) {
-      console.error('Failed to delete chat:', error);
-      alert('Failed to delete chat: ' + error.message);
-    }
+    // 3. Save the hidden status permanently to Firebase using our chatService
+    await hideConversationForUser(convId, profile.id);
+  } catch (error) {
+    console.error('Failed to delete chat:', error);
+    alert('Failed to delete chat: ' + error.message);
+  }
   };
 
   const handleBatchDeleteForMe = async () => {
