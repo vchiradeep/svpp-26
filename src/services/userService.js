@@ -186,7 +186,14 @@ export const subscribeToIncomingRequests = (myId, callback) => {
     where('receiver_id', '==', myId),
     where('status', '==', 'pending')
   );
+  
   return onSnapshot(q, async (snapshot) => {
+    // Only fetch if documents actually changed or exist
+    if (snapshot.empty) {
+      callback([]);
+      return;
+    }
+
     const requests = await Promise.all(
       snapshot.docs.map(async (d) => {
         const data = d.data();
