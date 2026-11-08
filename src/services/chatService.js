@@ -28,7 +28,8 @@ import {
 //   conversations/{conversationId}
 //     { memberIds: [uid, uid],
 //       memberProfiles: { [uid]: { username, avatar_url } },  // denormalized
-//       unread_count: { [uid]: number },                       // denormalized
+//       unread_count: { [uid]: number },                     // denormalized
+//       hidden_at: { [uid]: timestamp },                     // denormalized hide state
 //       is_group, name, avatar_url,
 //       last_message, last_message_at, created_at }
 //   conversations/{conversationId}/members/{uid}
@@ -38,24 +39,8 @@ import {
 //       is_deleted_for_everyone, deleted_for: [uid] }
 //   conversations/{conversationId}/messages/{messageId}/reactions/{reactionId}
 //     { user_id, emoji, created_at }
-//
-// Why memberProfiles + unread_count live ON the conversation doc:
-// Postgrest (Supabase) can return a conversation with its messages and
-// members embedded in one nested-select query. Firestore has no equivalent
-// join, so the app's existing conversation-list rendering (which expects
-// `c.conversation_members` with nested `.profiles`, and computes unread
-// counts from an embedded `c.messages` array) would otherwise need fetching
-// every conversation's full message history just to render a list — that's
-// both slow and expensive at scale. Denormalizing member profile summaries
-// and a running unread counter onto the conversation doc itself means the
-// list renders from ONE query, and this file reshapes the result into the
-// same `conversation_members`-array shape the rest of the app already
-// expects, so nothing downstream had to be rewritten.
 // ---------------------------------------------------------------------------
 
-// Turns { memberIds, memberProfiles } into the conversation_members-array
-// shape the render tree expects, e.g.:
-//   [{ user_id, profiles: { username, avatar_url } }]
 const withCompatMembersShape = (docId, data) => {
   const memberIds = data.memberIds || [];
   const memberProfiles = data.memberProfiles || {};
@@ -80,17 +65,16 @@ export const fetchUserConversations = async (myId) => {
       orderBy('last_message_at', 'desc')
     );
     const snapshot = await getDocs(convsQuery);
-    return snapshot.docs.map((d) => withCompatMembersShape(d.id, d.data()));
+    return snapshot.docs
+      .map((d) => ({ id: d.id, ...d.data() }))
+      .filter((data) => !data.hidden_at?.[myId])
+      .map((data) => withCompatMembersShape(data.id, data));
   } catch (error) {
     console.error('Error fetching user conversations:', error);
     return [];
   }
 };
 
-// Realtime version. Returns the unsubscribe function.
-// NOTE: array-contains + orderBy on a different field needs a Firestore
-// composite index — the first run will log an error with a direct link to
-// create it; click it once and it's permanent.
 export const subscribeToUserConversations = (myId, callback) => {
   const convsRef = collection(db, 'conversations');
   const convsQuery = query(
@@ -99,7 +83,11 @@ export const subscribeToUserConversations = (myId, callback) => {
     orderBy('last_message_at', 'desc')
   );
   return onSnapshot(convsQuery, (snapshot) => {
-    callback(snapshot.docs.map((d) => withCompatMembersShape(d.id, d.data())));
+    const activeConvs = snapshot.docs
+      .map((d) => ({ id: d.id, ...d.data() }))
+      .filter((data) => !data.hidden_at?.[myId])
+      .map((data) => withCompatMembersShape(data.id, data));
+    callback(activeConvs);
   }, (error) => {
     console.error('Error in conversations subscription:', error);
   });
@@ -120,6 +108,7 @@ export const createDirectConversation = async (myProfile, friendProfile) => {
       [friendId]: { username: friendProfile.username, avatar_url: friendProfile.avatar_url || null },
     },
     unread_count: { [myId]: 0, [friendId]: 0 },
+    hidden_at: { [myId]: null, [friendId]: null },
     last_message: null,
     last_message_at: now,
     created_at: now,
@@ -141,9 +130,11 @@ export const createGroupConversation = async (creatorProfile, memberProfilesList
   const allMemberIds = allProfiles.map((p) => p.id);
   const memberProfiles = {};
   const unreadCount = {};
+  const hiddenAt = {};
   allProfiles.forEach((p) => {
     memberProfiles[p.id] = { username: p.username, avatar_url: p.avatar_url || null };
     unreadCount[p.id] = 0;
+    hiddenAt[p.id] = null;
   });
 
   const convsRef = collection(db, 'conversations');
@@ -158,6 +149,7 @@ export const createGroupConversation = async (creatorProfile, memberProfilesList
     memberIds: allMemberIds,
     memberProfiles,
     unread_count: unreadCount,
+    hidden_at: hiddenAt,
     last_message: null,
     last_message_at: now,
     created_at: now,
@@ -176,9 +168,6 @@ export const createGroupConversation = async (creatorProfile, memberProfilesList
   return newConvRef.id;
 };
 
-// Generic field update for a conversation doc — used for the many small
-// one-off updates (avatar_url, admin_ids, only_admins_can_message, name,
-// etc.) that don't warrant their own dedicated function.
 export const updateConversation = async (conversationId, updates) => {
   await updateDoc(doc(db, 'conversations', conversationId), updates);
 };
@@ -192,6 +181,7 @@ export const addConversationMember = async (conversationId, memberProfile) => {
       avatar_url: memberProfile.avatar_url || null,
     },
     [`unread_count.${memberProfile.id}`]: 0,
+    [`hidden_at.${memberProfile.id}`]: null,
   });
   await setDoc(doc(db, 'conversations', conversationId, 'members', memberProfile.id), {
     last_read_at: null, hidden_at: null, joined_at: serverTimestamp(),
@@ -204,6 +194,7 @@ export const removeConversationMember = async (conversationId, userId, currentAd
     memberIds: arrayRemove(userId),
     [`memberProfiles.${userId}`]: deleteField(),
     [`unread_count.${userId}`]: deleteField(),
+    [`hidden_at.${userId}`]: deleteField(),
   };
   if (currentAdminIds.includes(userId)) {
     updates.admin_ids = currentAdminIds.filter((id) => id !== userId);
@@ -225,9 +216,6 @@ export const fetchMembers = async (conversationId, conversation) => {
   }));
 };
 
-// Realtime subscription to a conversation's member docs — drives "Seen".
-// `conversation` (the parent doc's current data) is passed in so profile
-// info can be merged in from memberProfiles without an extra read.
 export const subscribeToMembers = (conversationId, conversation, callback) => {
   const membersRef = collection(db, 'conversations', conversationId, 'members');
   return onSnapshot(membersRef, (snapshot) => {
@@ -250,17 +238,22 @@ export const markAsRead = async (conversationId, userId) => {
 };
 
 export const hideConversationForUser = async (conversationId, userId) => {
+  const now = serverTimestamp();
   await updateDoc(doc(db, 'conversations', conversationId, 'members', userId), {
-    hidden_at: serverTimestamp(),
+    hidden_at: now,
+  });
+  await updateDoc(doc(db, 'conversations', conversationId), {
+    [`hidden_at.${userId}`]: now,
   });
 };
 
-// Un-hides a conversation the user previously hid (e.g. re-starting a direct
-// chat with someone whose conversation already existed) and marks it read.
 export const unhideConversationForUser = async (conversationId, userId) => {
   await updateDoc(doc(db, 'conversations', conversationId, 'members', userId), {
     hidden_at: null,
     last_read_at: serverTimestamp(),
+  });
+  await updateDoc(doc(db, 'conversations', conversationId), {
+    [`hidden_at.${userId}`]: null,
   });
 };
 
@@ -268,10 +261,6 @@ export const unhideConversationForUser = async (conversationId, userId) => {
 
 const MESSAGES_PAGE_SIZE = 30;
 
-// Fetches one extra row beyond pageSize (same trick the old Supabase
-// `.range(0, pageSize)` call used) purely to answer "does older history
-// exist" without a second query — the extra row itself is dropped before
-// returning.
 export const fetchMessages = async (conversationId, pageSize = MESSAGES_PAGE_SIZE) => {
   const messagesRef = collection(db, 'conversations', conversationId, 'messages');
   const messagesQuery = query(messagesRef, orderBy('created_at', 'desc'), limit(pageSize + 1));
@@ -285,9 +274,6 @@ export const fetchMessages = async (conversationId, pageSize = MESSAGES_PAGE_SIZ
   };
 };
 
-// `beforeDoc` is the `oldestDoc` returned from a previous fetchMessages /
-// fetchOlderMessages call — Firestore paginates by document snapshot, not
-// by offset.
 export const fetchOlderMessages = async (conversationId, beforeDoc, pageSize = MESSAGES_PAGE_SIZE) => {
   const messagesRef = collection(db, 'conversations', conversationId, 'messages');
   const messagesQuery = query(
@@ -313,8 +299,6 @@ export const subscribeToMessages = (conversationId, callback, pageSize = MESSAGE
   });
 };
 
-// `memberIds` is passed in (the caller already has it from the active
-// conversation in memory) purely to avoid an extra doc read on every send.
 export const sendMessage = async (conversationId, senderId, content, memberIds = [], extra = {}) => {
   const now = serverTimestamp();
   const messagesRef = collection(db, 'conversations', conversationId, 'messages');
@@ -330,8 +314,12 @@ export const sendMessage = async (conversationId, senderId, content, memberIds =
   });
 
   const unreadIncrements = {};
-  memberIds.filter((uid) => uid !== senderId).forEach((uid) => {
-    unreadIncrements[`unread_count.${uid}`] = increment(1);
+  const hiddenResets = {};
+  memberIds.forEach((uid) => {
+    if (uid !== senderId) {
+      unreadIncrements[`unread_count.${uid}`] = increment(1);
+    }
+    hiddenResets[`hidden_at.${uid}`] = null;
   });
 
   await updateDoc(doc(db, 'conversations', conversationId), {
@@ -339,6 +327,7 @@ export const sendMessage = async (conversationId, senderId, content, memberIds =
     last_message_at: now,
     last_message_sender_id: senderId,
     ...unreadIncrements,
+    ...hiddenResets,
   });
 
   return newMessageRef.id;
@@ -348,21 +337,8 @@ export const updateMessage = async (conversationId, messageId, updates) => {
   await updateDoc(doc(db, 'conversations', conversationId, 'messages', messageId), updates);
 };
 
-// Deleting a message previously never touched the conversation's
-// denormalized last_message/last_message_at fields, so the sidebar preview
-// kept showing the deleted message's content forever instead of falling
-// back to whatever the previous, still-visible message was. This recomputes
-// those fields from the most recent messages after any delete.
-//
-// forUserId is only passed for a "delete for me" action: that must NOT
-// change what OTHER members see as the conversation's last message (only
-// this user's own view changed), so their personal fallback is stored
-// separately under last_message_overrides.{uid} rather than overwriting the
-// shared last_message field everyone else reads.
 const recomputeConversationPreview = async (conversationId, forUserId = null) => {
   const messagesRef = collection(db, 'conversations', conversationId, 'messages');
-  // The previous still-visible message is virtually always within the last
-  // handful — 50 is a generous safety margin without scanning full history.
   const recentQuery = query(messagesRef, orderBy('created_at', 'desc'), limit(50));
   const snapshot = await getDocs(recentQuery);
   const recentMessages = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
@@ -399,16 +375,6 @@ export const deleteMessageForMe = async (conversationId, messageId, userId) => {
 
 // -------------------- Reactions --------------------
 
-// Fetches every reaction across every message in a conversation in ONE
-// query, via a collectionGroup scan filtered by conversation_id (stored
-// redundantly on each reaction doc for exactly this purpose) — the
-// alternative would be one subcollection read per visible message, which
-// doesn't scale as a conversation grows.
-// NOTE: this needs a Firestore collectionGroup index on 'reactions' for the
-// conversation_id field — same as the composite index note above, Firestore
-// will log a direct link to create it on first run.
-// Full message history, unpaginated — used only for the media gallery,
-// which needs everything ever shared, not just the currently-loaded page.
 export const fetchAllMessagesForGallery = async (conversationId) => {
   const messagesRef = collection(db, 'conversations', conversationId, 'messages');
   const messagesQuery = query(messagesRef, orderBy('created_at', 'desc'));
@@ -416,9 +382,6 @@ export const fetchAllMessagesForGallery = async (conversationId) => {
   return snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
 };
 
-// Realtime reactions across the WHOLE conversation (collectionGroup scan
-// filtered by conversation_id, same approach as fetchReactionsForConversation)
-// rather than one listener per visible message.
 export const subscribeToConversationReactions = (conversationId, callback) => {
   const q = query(collectionGroup(db, 'reactions'), where('conversation_id', '==', conversationId));
   return onSnapshot(q, (snapshot) => {
