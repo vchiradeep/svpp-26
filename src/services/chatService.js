@@ -67,7 +67,7 @@ export const fetchUserConversations = async (myId) => {
     const snapshot = await getDocs(convsQuery);
     return snapshot.docs
       .map((d) => ({ id: d.id, ...d.data() }))
-      .filter((data) => !data.hidden_at?.[myId])
+      .filter((data) => !data.hidden_at?.[myId]) // <--- Make sure this filter is here
       .map((data) => withCompatMembersShape(data.id, data));
   } catch (error) {
     console.error('Error fetching user conversations:', error);
