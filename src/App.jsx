@@ -85,8 +85,9 @@ const EMOJI_PALETTE = [
 
 const FAVICON_SVG = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="28" cy="36" r="15" fill="%230f172a"/><path d="M12 88 C12 62 44 62 44 88 Z" fill="%230f172a"/><circle cx="72" cy="36" r="15" fill="%230f172a"/><path d="M56 88 C56 62 88 62 88 88 Z" fill="%230f172a"/><path d="M38 28 C38 18 64 18 64 28 C64 35 55 37 49 41 L43 45 L45 39 C39 39 38 34 38 28 Z" fill="%230f172a"/><rect x="43" y="24" width="16" height="2.5" rx="1.2" fill="%23ffffff"/><rect x="43" y="29" width="16" height="2.5" rx="1.2" fill="%23ffffff"/></svg>`;
 const parseSafeDate = (val) => {
-  if (!val) return new Date();
+  if (!val) return new Date(0); // Fixed: returns epoch 0 instead of 'now' for unsynced timestamps
   if (typeof val.toDate === 'function') return val.toDate();
+  if (typeof val === 'number') return new Date(val);
   if (val.seconds) return new Date(val.seconds * 1000);
   return new Date(val);
 };
@@ -262,6 +263,8 @@ const formatLastSeen = (isoString) => {
   let date;
   if (typeof isoString.toDate === 'function') {
     date = isoString.toDate();
+  } else if (typeof isoString === 'number') {
+    date = new Date(isoString); // Added support for RTDB millisecond timestamps
   } else if (isoString.seconds) {
     date = new Date(isoString.seconds * 1000);
   } else {
@@ -1026,17 +1029,18 @@ export default function App() {
   };
 
   const getUserStatusType = (userId) => {
-    if (userId === profile?.id) return 'online';
-    const entry = onlinePresenceState[userId];
-    if (!entry || entry.state !== 'online') return 'offline';
+  if (userId === profile?.id) return 'online';
+  const entry = onlinePresenceState[userId];
+  if (!entry) return 'offline';
+  
+  // Fixed: Check both .state and .status to match RTDB presence schema
+  const stateVal = entry.state || entry.status;
+  if (stateVal !== 'online') return 'offline';
 
-    // RTDB's onDisconnect already guarantees this flips to 'offline' the
-    // instant the socket drops, so last_changed staleness is a defensive
-    // fallback only (e.g. a listener hiccup), not the primary check.
-    if (!entry.last_changed) return 'online';
-    const age = Date.now() - entry.last_changed;
-    return age < PRESENCE_STALE_THRESHOLD_MS ? 'online' : 'offline';
-  };
+  if (!entry.last_changed) return 'online';
+  const age = Date.now() - entry.last_changed;
+  return age < PRESENCE_STALE_THRESHOLD_MS ? 'online' : 'offline';
+};
 
   // Conversation list, unread counts, and new-message notifications all stay
   // live from ONE subscription — this replaces the old separate listeners

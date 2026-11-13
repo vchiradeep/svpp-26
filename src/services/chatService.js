@@ -233,11 +233,16 @@ export const subscribeToMembers = (conversationId, conversation, callback) => {
 
 export const markAsRead = async (conversationId, userId) => {
   const now = new Date().toISOString();
+  
+  // 1. Update member subcollection read time
   await updateDoc(doc(db, 'conversations', conversationId, 'members', userId), { 
     last_read_at: now 
   });
+
+  // 2. Touch parent conversation and clear unread count to force instant UI sync
   await updateDoc(doc(db, 'conversations', conversationId), { 
-    [`unread_count.${userId}`]: 0 
+    [`unread_count.${userId}`]: 0,
+    updated_at: now
   });
 };
 
