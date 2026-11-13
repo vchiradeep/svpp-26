@@ -259,7 +259,6 @@ const getFirebaseAuthErrorMessage = (err) => {
 const formatLastSeen = (isoString) => {
   if (!isoString) return 'offline';
   
-  // Safely convert Firestore timestamps, objects, or strings into a valid Date
   let date;
   if (typeof isoString.toDate === 'function') {
     date = isoString.toDate();
