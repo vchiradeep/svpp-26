@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { auth } from './firebaseClient';
+import { getDatabase, ref, set } from 'firebase/database'; // <-- Add this line
 import {
   onAuthStateChanged,
   signOut,
@@ -994,18 +995,31 @@ export default function App() {
   const PRESENCE_STALE_THRESHOLD_MS = 150000;
 
   useEffect(() => {
-    // Gate on the Firebase auth user id directly — it's available the
-    // instant sign-in resolves, with no Firestore round-trip in front of it.
     const presenceUserId = user?.uid;
     if (!presenceUserId) return;
 
-    // initPresence arms the RTDB onDisconnect() hook and marks this user
-    // online; it returns a cleanup function that marks them offline again on
-    // unmount (e.g. sign-out while the app stays open).
     const cleanupPresence = initPresence(presenceUserId);
 
-    // One listener for everyone's presence, rather than one per friend —
-    // cheaper, and it's what drives every green dot in the UI.
+    // Automatically switch to offline when changing tabs or minimizing the window
+    const handleVisibilityChange = () => {
+      const db = getDatabase();
+      const userPresenceRef = ref(db, `presence/${presenceUserId}`);
+      
+      if (document.visibilityState === 'hidden') {
+        set(userPresenceRef, {
+          state: 'offline',
+          last_changed: Date.now()
+        });
+      } else {
+        set(userPresenceRef, {
+          state: 'online',
+          last_changed: Date.now()
+        });
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
     const unsubscribeAll = subscribeToAllPresence((statusMap) => {
       setOnlinePresenceState(statusMap);
       setUserLastSeen((prev) => {
@@ -1018,6 +1032,7 @@ export default function App() {
     });
 
     return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
       unsubscribeAll();
       cleanupPresence();
     };
