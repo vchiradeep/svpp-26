@@ -232,13 +232,13 @@ export const subscribeToMembers = (conversationId, conversation, callback) => {
 };
 
 export const markAsRead = async (conversationId, userId) => {
-  const now = serverTimestamp();
+  const now = new Date().toISOString();
   await updateDoc(doc(db, 'conversations', conversationId, 'members', userId), { last_read_at: now });
   await updateDoc(doc(db, 'conversations', conversationId), { [`unread_count.${userId}`]: 0 });
 };
 
 export const hideConversationForUser = async (conversationId, userId) => {
-  const now = serverTimestamp();
+  const now = new Date().toISOString();
   await updateDoc(doc(db, 'conversations', conversationId, 'members', userId), {
     hidden_at: now,
   });
@@ -248,9 +248,10 @@ export const hideConversationForUser = async (conversationId, userId) => {
 };
 
 export const unhideConversationForUser = async (conversationId, userId) => {
+  const now = new Date().toISOString();
   await updateDoc(doc(db, 'conversations', conversationId, 'members', userId), {
     hidden_at: null,
-    last_read_at: serverTimestamp(),
+    last_read_at: now,
   });
   await updateDoc(doc(db, 'conversations', conversationId), {
     [`hidden_at.${userId}`]: null,
