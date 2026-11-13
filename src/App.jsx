@@ -258,7 +258,20 @@ const getFirebaseAuthErrorMessage = (err) => {
 
 const formatLastSeen = (isoString) => {
   if (!isoString) return 'offline';
-  const diffSecs = Math.floor((new Date() - new Date(isoString)) / 1000);
+  
+  // Safely convert Firestore timestamps, objects, or strings into a valid Date
+  let date;
+  if (typeof isoString.toDate === 'function') {
+    date = isoString.toDate();
+  } else if (isoString.seconds) {
+    date = new Date(isoString.seconds * 1000);
+  } else {
+    date = new Date(isoString);
+  }
+
+  if (isNaN(date.getTime())) return 'offline';
+
+  const diffSecs = Math.floor((new Date() - date) / 1000);
   if (diffSecs < 60) return 'last seen just now';
   const diffMins = Math.floor(diffSecs / 60);
   if (diffMins < 60) return `last seen ${diffMins}m ago`;
